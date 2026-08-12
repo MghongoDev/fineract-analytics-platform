@@ -25,6 +25,13 @@ USER airflow
 COPY orchestration/requirements.txt /tmp/orchestration-requirements.txt
 RUN pip install --no-cache-dir -r /tmp/orchestration-requirements.txt
 
+# Dbt is invoked as a subprocess by the custom Airflow operator.  An isolated
+# virtualenv prevents dbt's protobuf dependency from replacing the version
+# required by Airflow's OpenTelemetry packages.
+COPY orchestration/dbt-requirements.txt /tmp/dbt-requirements.txt
+RUN python -m venv /home/airflow/dbt-venv \
+ && /home/airflow/dbt-venv/bin/pip install --no-cache-dir -r /tmp/dbt-requirements.txt
+
 # The ingestion package - installed non-editable so the image is
 # self-contained and reproducible.
 COPY --chown=airflow:root ingestion /tmp/ingestion
@@ -38,6 +45,7 @@ COPY --chown=airflow:root transform/fineract_analytics /opt/airflow/dbt
 ENV DBT_PROJECT_DIR=/opt/airflow/dbt \
     DBT_PROFILES_DIR=/opt/airflow/dbt \
     PYTHONPATH=/opt/airflow/plugins:/opt/airflow/dags \
+    PATH=/home/airflow/dbt-venv/bin:${PATH} \
     PIP_NO_CACHE_DIR=1
 
 WORKDIR /opt/airflow

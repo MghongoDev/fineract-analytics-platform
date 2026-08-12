@@ -1,10 +1,6 @@
 # Extra dependencies layered on top of the apache/airflow base image.
-#
-# Airflow itself is NOT listed: it comes from the base image, and pinning
-# it here is the classic way to end up with two Airflow versions fighting
-# over the same metadata database.
-dbt-core>=1.8,<2.0
-dbt-clickhouse>=1.8,<2.0
+# dbt is installed into an isolated virtualenv (see dbt-requirements.txt)
+# because its protobuf version is incompatible with Airflow's telemetry stack.
 clickhouse-connect>=0.7,<1.0
 psycopg[binary]>=3.1,<4
 requests>=2.31,<3
