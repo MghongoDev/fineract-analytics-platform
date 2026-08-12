@@ -590,7 +590,7 @@ jobs:
       # already gone through every other job via `needs:`.
       - name: Build (and push on main) ${{ matrix.image }}
         if: steps.exists.outputs.found == 'true'
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v7
         with:
           context: ${{ matrix.context }}
           file: ${{ matrix.dockerfile }}
