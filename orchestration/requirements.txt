@@ -4,5 +4,5 @@
 clickhouse-connect>=0.7,<1.0
 psycopg[binary]>=3.1,<4
 requests>=2.31,<3
-prometheus-client>=0.20,<1
+prometheus-client>=0.26.0,<1
 apache-airflow-providers-postgres>=5.11
