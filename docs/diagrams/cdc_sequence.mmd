@@ -1,0 +1,62 @@
+%%{ init: { "theme": "neutral" } }%%
+sequenceDiagram
+    autonumber
+    participant Fineract as Fineract API
+    participant Ingest as ingestion service
+    participant PG as Postgres oltp.loan_transactions
+    participant WAL as WAL (pgoutput, fineract_cdc_pub)
+    participant DBZ as Debezium connector
+    participant Kafka as Kafka topic<br/>fineract.oltp.loan_transactions
+    participant KEng as ClickHouse Kafka engine<br/>fineract_raw.kafka_loan_transactions
+    participant MV as MV mv_loan_transactions<br/>(+ _errors, _audit)
+    participant RMT as fineract_raw.loan_transactions<br/>ReplacingMergeTree(_version, _is_deleted)
+    participant Gate as Airflow CDCCaughtUpSensor
+    participant DBT as dbt incremental model<br/>fct_loan_transaction
+    participant Mart as fineract_marts.fct_loan_transaction
+
+    Note over Fineract,Mart: One repayment, end to end. Typical total lag: 1-3s.
+
+    Fineract->>Ingest: POST /loans/{id}/transactions (repayment posted)
+    activate Ingest
+    Ingest->>Ingest: compute _payload_hash
+    Ingest->>PG: INSERT ... ON CONFLICT (transaction_id)<br/>DO UPDATE WHERE _payload_hash IS DISTINCT
+    deactivate Ingest
+    Note right of PG: Same transaction also commits<br/>meta.ingestion_watermark and<br/>meta.ingestion_run - exactly-once<br/>with respect to Postgres.
+
+    PG->>WAL: COMMIT appends WAL record<br/>(REPLICA IDENTITY DEFAULT: PK only)
+    Note over WAL: __source_ts_ms = this COMMIT time.<br/>This becomes _version downstream -<br/>never Debezium's read time.
+
+    WAL-->>DBZ: logical replication slot<br/>fineract_cdc_slot streams the change
+    Note over DBZ: slot poll interval ~500ms plus decode.<br/>This segment plus the Kafka produce<br/>below is most of the 1-3s budget.
+    DBZ->>DBZ: unwrap SMT flattens before/after image,<br/>decimal.handling.mode=string preserves<br/>money precision
+    DBZ->>Kafka: produce JSON row<br/>(acks=all, idempotent producer)
+
+    Kafka-->>KEng: native ClickHouse Kafka consumer polls<br/>(kafka_poll_max_batch_size, flush every 3s)
+    Note over KEng: Wire types only (String/Int32/Bool).<br/>A malformed message sets a virtual<br/>_error column here instead of stalling<br/>the partition.
+
+    KEng->>MV: materialized view fires on insert
+    alt message parses cleanly
+        MV->>RMT: typed row, _version = __source_ts_ms (ms),<br/>_is_deleted = (__op = 'd')
+        MV->>RMT: also written to fineract_raw.cdc_audit<br/>(every event, never collapsed)
+    else message fails to parse
+        MV->>MV: routed to fineract_raw.cdc_errors instead<br/>(topic, offset, error, raw_message)
+        Note over MV: CDCParseErrors alert fires -<br/>row is not lost, just quarantined.
+    end
+
+    Note over RMT: Merges are asynchronous - this key may<br/>exist as multiple versions until a<br/>background merge collapses it. Readers<br/>must not assume the table is collapsed.
+
+    loop every 4h (fineract_analytics_pipeline DAG)
+        Gate->>PG: count(*) per gated entity
+        Gate->>RMT: count(*) WHERE _is_deleted = 0<br/>(via fineract_ops.v_reconciliation_counts)
+        Gate->>RMT: check fineract_ops.v_cdc_freshness<br/>(freshness_seconds < max_lag_seconds)
+        alt row counts match AND freshness < 300s
+            Gate-->>DBT: gate opens, transform proceeds
+        else counts differ or stream stale
+            Gate->>Gate: reschedule and poke again<br/>(timeout 1800s)
+        end
+    end
+
+    DBT->>RMT: argMax(column, _version) GROUP BY transaction_id<br/>(latest_by_key macro - NOT FINAL, see ADR 0003)
+    Note over DBT: incremental_cdc_filter: reprocess<br/>cdc_commit_at >= max(source_updated_at)<br/>in this model minus a 48h lookback.<br/>delete+insert on unique_key=transaction_id<br/>makes reprocessing idempotent.
+    DBT->>Mart: delete+insert rows for the reprocessed window,<br/>joined to loan/client/product dimension keys
+    Note over Mart: Repayment is now queryable in the<br/>ledger fact and rolls into<br/>agg_loan_performance_monthly on the<br/>next run.

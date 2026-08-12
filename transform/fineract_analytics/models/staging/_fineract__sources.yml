@@ -1,0 +1,78 @@
+version: 2
+
+sources:
+  - name: fineract_raw
+    description: >
+      CDC landing zone. Every table here is a ReplacingMergeTree fed by a
+      Debezium topic via a ClickHouse Kafka engine table. Rows are
+      at-least-once and may be uncollapsed; staging is the only layer
+      allowed to read from here.
+    database: fineract_raw
+    schema: fineract_raw
+
+    # Freshness is measured on the SOURCE commit time, not on the
+    # ClickHouse insert time - the question being asked is "how stale is
+    # the business data", not "how recently did we write something".
+    loaded_at_field: _source_commit_at
+    freshness:
+      warn_after: { count: 30, period: minute }
+      error_after: { count: 2, period: hour }
+
+    tables:
+      - name: offices
+        description: Branch hierarchy.
+        columns:
+          - name: office_id
+            description: Fineract office id (natural key).
+            data_tests: [not_null]
+
+      - name: staff
+        description: Loan officers and branch staff.
+        columns:
+          - name: staff_id
+            data_tests: [not_null]
+
+      - name: loan_products
+        description: Loan product catalogue.
+        columns:
+          - name: product_id
+            data_tests: [not_null]
+
+      - name: savings_products
+        description: Savings product catalogue.
+        columns:
+          - name: product_id
+            data_tests: [not_null]
+
+      - name: clients
+        description: Borrower / member master data.
+        columns:
+          - name: client_id
+            data_tests: [not_null]
+
+      - name: loans
+        description: Loan accounts with summary balances.
+        # Loans move constantly during business hours; a 30 minute gap is
+        # already suspicious.
+        freshness:
+          warn_after: { count: 15, period: minute }
+          error_after: { count: 1, period: hour }
+        columns:
+          - name: loan_id
+            data_tests: [not_null]
+
+      - name: loan_transactions
+        description: Repayment / disbursal ledger.
+        freshness:
+          warn_after: { count: 15, period: minute }
+          error_after: { count: 1, period: hour }
+        columns:
+          - name: transaction_id
+            data_tests: [not_null]
+
+      - name: savings_accounts
+        description: Deposit accounts.
+
+      - name: cdc_audit
+        description: Every CDC event, uncollapsed. Used for lag reporting.
+        loaded_at_field: source_commit_at

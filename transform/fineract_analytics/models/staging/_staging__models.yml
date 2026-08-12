@@ -1,0 +1,139 @@
+version: 2
+
+models:
+  - name: stg_fineract__clients
+    description: >
+      One current row per Fineract client. CDC versions collapsed with
+      FINAL, deleted rows removed, columns renamed to warehouse
+      conventions. No joins and no business rules by design.
+    columns:
+      - name: client_id
+        description: Fineract client id. Natural key and primary index.
+        data_tests: [not_null, unique]
+      - name: client_key
+        description: Deterministic surrogate key (cityHash64 of client_id).
+        data_tests: [not_null, unique]
+      - name: is_active
+        description: 1 when the client is in Fineract status Active.
+        data_tests:
+          - accepted_values: { values: [0, 1] }
+      - name: office_id
+        description: Owning branch.
+      - name: tenure_days
+        description: Days since activation. NULL for never-activated clients.
+
+  - name: stg_fineract__loans
+    description: >
+      One current row per loan account with all balances cast to
+      Decimal(19,6). Reconciles Fineract's two delinquency
+      representations into a single days_past_due - the only piece of
+      judgement applied in the staging layer, applied once so every
+      consumer agrees.
+    columns:
+      - name: loan_id
+        description: Fineract loan id.
+        data_tests: [not_null, unique]
+      - name: loan_key
+        description: Deterministic surrogate key.
+        data_tests: [not_null, unique]
+      - name: client_id
+        description: Borrower.
+        data_tests:
+          - relationships:
+              to: ref('stg_fineract__clients')
+              field: client_id
+              config:
+                severity: warn
+                # warn, not error: a loan can legitimately reference a
+                # client that CDC has not yet delivered. It self-heals on
+                # the next run; failing the build would be a false alarm.
+      - name: principal
+        description: Approved/contracted principal amount.
+        data_tests: [not_null]
+      - name: days_past_due
+        description: Days the loan is in arrears. 0 when current.
+        data_tests: [not_null]
+      - name: par_bucket
+        description: Portfolio-at-Risk band derived from days_past_due.
+        data_tests:
+          - accepted_values:
+              values: ['Current', 'PAR 1-30', 'PAR 31-60', 'PAR 61-90',
+                       'PAR 91-180', 'PAR 180+']
+      - name: status
+        description: Fineract loan status label.
+      - name: total_outstanding
+        description: Principal plus interest still owed.
+
+  - name: stg_fineract__loan_transactions
+    description: >
+      Repayment and disbursal ledger, deduplicated with argMax inside the
+      incremental window. Reversed transactions are retained for audit but
+      flagged with is_countable = 0.
+    columns:
+      - name: transaction_id
+        description: Fineract transaction id.
+        data_tests: [not_null, unique]
+      - name: loan_id
+        description: Parent loan.
+        data_tests: [not_null]
+      - name: transaction_date
+        description: Value date of the transaction.
+        data_tests: [not_null]
+      - name: transaction_category
+        description: Normalised transaction type, classified on the stable type id.
+        data_tests:
+          - accepted_values:
+              values: ['disbursement', 'repayment', 'accrual', 'waive_interest',
+                       'write_off', 'recovery_repayment', 'waive_charges',
+                       'charge_payment', 'refund', 'other']
+      - name: is_countable
+        description: 0 for reversed transactions; every measure must respect this.
+        data_tests:
+          - accepted_values: { values: [0, 1] }
+
+  - name: stg_fineract__offices
+    description: Branch hierarchy with depth derived from Fineract's materialised path.
+    columns:
+      - name: office_id
+        description: Fineract office id.
+        data_tests: [not_null, unique]
+      - name: office_name
+        description: Branch name.
+        data_tests: [not_null]
+      - name: hierarchy_depth
+        description: 0 for head office, incrementing per level.
+
+  - name: stg_fineract__staff
+    description: Branch staff and loan officers.
+    columns:
+      - name: staff_id
+        description: Fineract staff id.
+        data_tests: [not_null, unique]
+      - name: is_loan_officer
+        description: 1 when the member of staff carries a loan book.
+
+  - name: stg_fineract__loan_products
+    description: Loan product catalogue with contracted terms.
+    columns:
+      - name: product_id
+        description: Fineract loan product id.
+        data_tests: [not_null, unique]
+      - name: product_name
+        description: Product display name.
+        data_tests: [not_null]
+
+  - name: stg_fineract__savings_products
+    description: Savings product catalogue.
+    columns:
+      - name: product_id
+        description: Fineract savings product id.
+        data_tests: [not_null, unique]
+
+  - name: stg_fineract__savings_accounts
+    description: Deposit accounts with balances.
+    columns:
+      - name: savings_id
+        description: Fineract savings account id.
+        data_tests: [not_null, unique]
+      - name: client_id
+        description: Account holder.

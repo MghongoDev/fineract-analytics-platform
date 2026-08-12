@@ -1,0 +1,37 @@
+version: 2
+
+models:
+  - name: int_loan_repayment_behaviour
+    description: >
+      Loan-grain repayment behaviour derived from the transaction ledger:
+      totals, cadence, regularity and anomaly counts. Materialised rather
+      than repeated as a CTE because three separate consumers (the loan
+      fact, the risk marts and the ML feature table) need exactly the same
+      definitions.
+    columns:
+      - name: loan_id
+        description: Loan the behaviour describes.
+        data_tests: [not_null, unique]
+      - name: repayment_count
+        description: Countable (non-reversed) repayment transactions.
+        data_tests: [not_null]
+      - name: repayment_regularity_cv
+        description: >
+          Coefficient of variation of the gap between repayments. Scale
+          free, so it is comparable across loan terms; a rising value is
+          an early distress signal.
+
+  - name: int_client_portfolio
+    description: >
+      Client-grain rollup of the whole relationship - loans and savings.
+      The single place client-level aggregates are computed, so
+      "active loans" cannot mean two different things on two dashboards.
+    columns:
+      - name: client_id
+        description: Client the rollup describes.
+        data_tests: [not_null, unique]
+      - name: total_loans
+        description: Lifetime loan count.
+        data_tests: [not_null]
+      - name: historical_write_off_rate
+        description: Written-off loans as a share of all loans taken.

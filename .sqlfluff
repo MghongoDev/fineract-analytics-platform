@@ -1,0 +1,84 @@
+# =====================================================================
+# sqlfluff config for transform/fineract_analytics (dbt models on
+# ClickHouse). Lives at the repo root so editors/pre-commit pick it up
+# without per-directory config.
+# =====================================================================
+
+[sqlfluff]
+dialect = clickhouse
+templater = jinja
+max_line_length = 100
+runaway_limit = 10
+processes = 0
+
+# ---------------------------------------------------------------------
+# Rules excluded project-wide, and why. These are not "sqlfluff is
+# wrong" exclusions - they are rules that actively fight the way this
+# project writes dbt/Jinja SQL, and fighting them would mean writing
+# worse SQL to satisfy a linter rather than the reader.
+# ---------------------------------------------------------------------
+exclude_rules =
+    # L034 wants SELECT columns in a fixed order (ids, then everything
+    # else). Every model in this repo groups columns by MEANING (keys /
+    # descriptive / measures / lineage) with a comment header per group
+    # - see fct_loan.sql - which the rule cannot express and would
+    # otherwise flag on every model.
+    L034,
+    # L011/L012 (implicit/explicit alias for tables/columns) fight the
+    # `as` convention already used consistently by hand throughout
+    # models/marts - both are internally consistent, only one can win,
+    # and rewriting 22 models to satisfy a formatter preference is not
+    # worth the diff noise.
+    L011,
+    # L026 (references must resolve to a CTE/table in the same query)
+    # produces false positives against dbt ref()/source() Jinja calls
+    # that only resolve after templating - the templater flattens macro
+    # output before this rule runs, so it sees names it cannot trace.
+    L026,
+    # L044 (query produces an unknown number of result columns) fires on
+    # every `select * from {{ ref(...) }}` in the staging layer, which
+    # is deliberate there (see stg_fineract__*.sql) - staging is
+    # explicitly the 1:1-with-raw layer, and enumerating every raw
+    # column a second time in staging would be the exact duplication
+    # the layering exists to avoid.
+    L044,
+    # L059 (prefer quoted identifiers) does not apply: ClickHouse
+    # identifiers here are deliberately unquoted snake_case throughout,
+    # and the rule's "always quote" default conflicts with that.
+    L059
+
+[sqlfluff:indentation]
+tab_space_size = 4
+indent_unit = space
+
+[sqlfluff:layout:type:comma]
+line_position = trailing
+
+# ---------------------------------------------------------------------
+# Jinja templater: point sqlfluff at the same macros dbt itself loads,
+# and enable the dbt built-ins (ref, source, config, var, is_incremental,
+# this, ...) so macro-heavy models like fct_loan_transaction.sql parse
+# instead of erroring on unresolved Jinja calls.
+# ---------------------------------------------------------------------
+[sqlfluff:templater:jinja]
+apply_dbt_builtins = True
+load_macros_from_path = transform/fineract_analytics/macros
+loader_search_path = transform/fineract_analytics/models
+
+[sqlfluff:templater:jinja:context]
+# Minimal stand-ins for the project vars models actually reference
+# (see transform/fineract_analytics/dbt_project.yml) - just enough for
+# sqlfluff to render the Jinja, not to reproduce dbt's real values.
+default_threshold_days = 90
+cdc_lookback_hours = 48
+date_spine_start = 2020-01-01
+date_spine_end = 2030-12-31
+
+[sqlfluff:rules:capitalisation.keywords]
+capitalisation_policy = lower
+
+[sqlfluff:rules:capitalisation.functions]
+capitalisation_policy = lower
+
+[sqlfluff:rules:capitalisation.identifiers]
+capitalisation_policy = lower

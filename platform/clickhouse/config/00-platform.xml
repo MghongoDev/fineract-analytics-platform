@@ -1,0 +1,99 @@
+<?xml version="1.0"?>
+<!--
+  =====================================================================
+  ClickHouse server overrides for this platform.
+
+  Mounted into /etc/clickhouse-server/config.d/, so these settings merge
+  with the packaged defaults rather than replacing them - the usual way
+  people break a ClickHouse container is by overwriting config.xml
+  wholesale and losing half the defaults.
+  =====================================================================
+-->
+<clickhouse>
+
+    <!--
+      Native Prometheus endpoint. ClickHouse can expose its own metrics
+      without an exporter sidecar; `asynchronous_metrics` is what carries
+      the numbers that actually predict trouble (parts counts, memory,
+      background pool saturation).
+    -->
+    <prometheus>
+        <endpoint>/metrics</endpoint>
+        <port>9363</port>
+        <metrics>true</metrics>
+        <events>true</events>
+        <asynchronous_metrics>true</asynchronous_metrics>
+        <status_info>true</status_info>
+    </prometheus>
+
+    <!--
+      Single-node sizing for a laptop-class demo. docs/SCALING.md covers
+      the multi-node numbers.
+    -->
+    <max_server_memory_usage_to_ram_ratio>0.7</max_server_memory_usage_to_ram_ratio>
+    <max_concurrent_queries>64</max_concurrent_queries>
+    <mark_cache_size>536870912</mark_cache_size>
+    <uncompressed_cache_size>1073741824</uncompressed_cache_size>
+
+    <!--
+      Background pools. Kafka engine consumers and ReplacingMergeTree
+      merges compete for these: starve the merge pool and duplicate
+      versions accumulate faster than they collapse.
+    -->
+    <background_pool_size>8</background_pool_size>
+    <background_schedule_pool_size>8</background_schedule_pool_size>
+    <background_message_broker_schedule_pool_size>8</background_message_broker_schedule_pool_size>
+
+    <!--
+      Kafka consumer defaults. `debug` is left empty deliberately -
+      setting it to `all` produces gigabytes of librdkafka logs, which is
+      the first thing people try when a consumer misbehaves and the
+      quickest way to fill the disk.
+    -->
+    <kafka>
+        <auto_offset_reset>earliest</auto_offset_reset>
+        <session_timeout_ms>30000</session_timeout_ms>
+        <heartbeat_interval_ms>3000</heartbeat_interval_ms>
+        <max_poll_interval_ms>300000</max_poll_interval_ms>
+        <reconnect_backoff_ms>500</reconnect_backoff_ms>
+        <reconnect_backoff_max_ms>10000</reconnect_backoff_max_ms>
+        <security_protocol>plaintext</security_protocol>
+    </kafka>
+
+    <!--
+      Query observability. Without query_log, "why was the dashboard slow
+      at 09:15" is unanswerable after the fact. TTL keeps it bounded.
+    -->
+    <query_log>
+        <database>system</database>
+        <table>query_log</table>
+        <flush_interval_milliseconds>7500</flush_interval_milliseconds>
+        <ttl>event_date + INTERVAL 30 DAY DELETE</ttl>
+    </query_log>
+
+    <part_log>
+        <database>system</database>
+        <table>part_log</table>
+        <flush_interval_milliseconds>7500</flush_interval_milliseconds>
+        <ttl>event_date + INTERVAL 14 DAY DELETE</ttl>
+    </part_log>
+
+    <logger>
+        <level>information</level>
+        <console>1</console>
+    </logger>
+
+    <merge_tree>
+        <!--
+          A part count over a few hundred means merges are losing the
+          race against inserts. These thresholds make ClickHouse push
+          back (delay, then reject) before queries degrade into scanning
+          thousands of tiny parts.
+        -->
+        <parts_to_delay_insert>300</parts_to_delay_insert>
+        <parts_to_throw_insert>600</parts_to_throw_insert>
+        <max_parts_in_total>10000</max_parts_in_total>
+        <merge_with_ttl_timeout>3600</merge_with_ttl_timeout>
+    </merge_tree>
+
+</clickhouse>

@@ -1,0 +1,6 @@
+# Runtime dependencies for the ingestion service.
+# Pinned to minor ranges: reproducible enough for a build, loose enough
+# that a security patch does not require a code change.
+requests>=2.31,<3
+psycopg[binary]>=3.1,<4
+prometheus-client>=0.20,<1

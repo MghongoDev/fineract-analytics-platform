@@ -1,0 +1,71 @@
+# =====================================================================
+# dbt profile.
+#
+# Everything comes from the environment so the same image runs in local
+# compose, CI and production with no file edits. DBT_PROFILES_DIR points
+# here (see the Airflow image and the Makefile).
+#
+# `ci` target: identical adapter, different schema prefix, so a CI run
+# can build the full DAG against a throwaway ClickHouse without ever
+# touching production relations.
+# =====================================================================
+fineract_analytics:
+  target: "{{ env_var('DBT_TARGET', 'dev') }}"
+  outputs:
+
+    dev:
+      type: clickhouse
+      driver: http
+      host: "{{ env_var('CLICKHOUSE_HOST', 'clickhouse') }}"
+      port: "{{ env_var('CLICKHOUSE_HTTP_PORT', '8123') | int }}"
+      user: "{{ env_var('CLICKHOUSE_USER', 'analytics') }}"
+      password: "{{ env_var('CLICKHOUSE_PASSWORD', 'analytics') }}"
+      schema: "{{ env_var('CLICKHOUSE_DATABASE', 'fineract') }}"
+      secure: false
+      verify: false
+      connect_timeout: 15
+      send_receive_timeout: 900
+      # Cluster settings are left unset on purpose: this is a single-node
+      # deployment. docs/SCALING.md covers the ReplicatedMergeTree +
+      # `cluster` switch for a multi-node move.
+      custom_settings:
+        # A dbt run is a batch workload; let it use the box.
+        max_execution_time: 900
+        max_memory_usage: 6000000000
+        # Inserts from dbt are large and few - waiting for the async
+        # buffer would only add latency here.
+        async_insert: 0
+        # Fail loudly rather than silently truncating a bad cast.
+        input_format_null_as_default: 0
+        # Deduplicate identical INSERT blocks on retry.
+        insert_deduplicate: 1
+      threads: "{{ env_var('DBT_THREADS', '4') | int }}"
+
+    ci:
+      type: clickhouse
+      driver: http
+      host: "{{ env_var('CLICKHOUSE_HOST', 'localhost') }}"
+      port: "{{ env_var('CLICKHOUSE_HTTP_PORT', '8123') | int }}"
+      user: "{{ env_var('CLICKHOUSE_USER', 'default') }}"
+      password: "{{ env_var('CLICKHOUSE_PASSWORD', '') }}"
+      schema: "{{ env_var('CLICKHOUSE_DATABASE', 'fineract_ci') }}"
+      secure: false
+      verify: false
+      connect_timeout: 15
+      send_receive_timeout: 300
+      threads: 4
+
+    prod:
+      type: clickhouse
+      driver: http
+      host: "{{ env_var('CLICKHOUSE_HOST') }}"
+      port: "{{ env_var('CLICKHOUSE_HTTP_PORT', '8443') | int }}"
+      user: "{{ env_var('CLICKHOUSE_USER') }}"
+      password: "{{ env_var('CLICKHOUSE_PASSWORD') }}"
+      schema: "{{ env_var('CLICKHOUSE_DATABASE', 'fineract') }}"
+      secure: true
+      verify: true
+      cluster: "{{ env_var('CLICKHOUSE_CLUSTER', '') }}"
+      connect_timeout: 15
+      send_receive_timeout: 1800
+      threads: "{{ env_var('DBT_THREADS', '8') | int }}"

@@ -1,0 +1,177 @@
+erDiagram
+    %% =================================================================
+    %% Raw / staging layer (fineract_raw.* <- fineract_staging.stg_fineract__*)
+    %% One row per entity below is 1:1 between raw and staging; staging
+    %% just collapses CDC versions and casts. Keys shown are the ones
+    %% that matter for joins, not the full column list.
+    %% =================================================================
+
+    OFFICES {
+        bigint office_id PK
+        bigint parent_id FK
+        string name
+        date opening_date
+    }
+
+    STAFF {
+        bigint staff_id PK
+        bigint office_id FK
+        bool is_loan_officer
+    }
+
+    LOAN_PRODUCTS {
+        bigint product_id PK
+        string name
+        string currency_code
+    }
+
+    SAVINGS_PRODUCTS {
+        bigint product_id PK
+        string name
+        string currency_code
+    }
+
+    CLIENTS {
+        bigint client_id PK
+        bigint office_id FK
+        bigint staff_id FK
+        string status_value
+    }
+
+    LOANS {
+        bigint loan_id PK
+        bigint client_id FK
+        bigint product_id FK
+        bigint office_id FK
+        bigint loan_officer_id FK
+        date disbursed_on_date
+    }
+
+    LOAN_TRANSACTIONS {
+        bigint transaction_id PK
+        bigint loan_id FK
+        date transaction_date
+        decimal amount
+    }
+
+    SAVINGS_ACCOUNTS {
+        bigint savings_id PK
+        bigint client_id FK
+        bigint product_id FK
+        bigint office_id FK
+    }
+
+    OFFICES ||--o{ OFFICES        : "parent_id (hierarchy)"
+    OFFICES ||--o{ STAFF          : employs
+    OFFICES ||--o{ CLIENTS        : registers
+    OFFICES ||--o{ LOANS          : books
+    OFFICES ||--o{ SAVINGS_ACCOUNTS : holds
+    STAFF ||--o{ LOANS            : "loan_officer_id"
+    CLIENTS ||--o{ LOANS          : borrows
+    CLIENTS ||--o{ SAVINGS_ACCOUNTS : deposits
+    LOAN_PRODUCTS ||--o{ LOANS    : instantiates
+    SAVINGS_PRODUCTS ||--o{ SAVINGS_ACCOUNTS : instantiates
+    LOANS ||--o{ LOAN_TRANSACTIONS : posts
+
+    %% =================================================================
+    %% Marts layer (fineract_marts.*)
+    %% =================================================================
+
+    DIM_CLIENT {
+        int64 client_key PK
+        bigint client_id
+        bigint office_id FK
+        bigint staff_id FK
+        string client_segment
+    }
+
+    DIM_OFFICE {
+        int64 office_key PK
+        bigint office_id
+        bigint parent_office_id FK
+    }
+
+    DIM_STAFF {
+        int64 staff_key PK
+        bigint staff_id
+        bigint office_id FK
+    }
+
+    DIM_LOAN_PRODUCT {
+        int64 product_key PK
+        bigint product_id
+    }
+
+    DIM_DATE {
+        date date_day PK
+        int date_key
+    }
+
+    FCT_LOAN {
+        int64 loan_key PK
+        bigint loan_id
+        bigint client_id FK
+        bigint product_id FK
+        bigint office_id FK
+        bigint loan_officer_id FK
+        int disbursement_date_key FK
+    }
+
+    FCT_LOAN_TRANSACTION {
+        bigint transaction_id PK
+        bigint loan_id FK
+        bigint client_id FK
+        bigint product_id FK
+        bigint office_id FK
+        int transaction_date_key FK
+    }
+
+    FCT_SAVINGS_ACCOUNT {
+        int64 savings_key PK
+        bigint savings_id
+        bigint client_id FK
+        bigint product_id FK
+        bigint office_id FK
+    }
+
+    AGG_PORTFOLIO_SNAPSHOT_DAILY {
+        int64 snapshot_key PK
+        date snapshot_date
+        bigint office_id FK
+        bigint product_id FK
+    }
+
+    AGG_LOAN_PERFORMANCE_MONTHLY {
+        date month_start PK
+        bigint office_id FK
+        bigint product_id FK
+    }
+
+    DIM_CLIENT ||--o{ FCT_LOAN            : "client_id"
+    DIM_CLIENT ||--o{ FCT_LOAN_TRANSACTION : "client_id"
+    DIM_CLIENT ||--o{ FCT_SAVINGS_ACCOUNT  : "client_id"
+    DIM_OFFICE ||--o{ FCT_LOAN            : "office_id"
+    DIM_OFFICE ||--o{ FCT_LOAN_TRANSACTION : "office_id"
+    DIM_OFFICE ||--o{ FCT_SAVINGS_ACCOUNT  : "office_id"
+    DIM_OFFICE ||--o{ AGG_PORTFOLIO_SNAPSHOT_DAILY : "office_id"
+    DIM_OFFICE ||--o{ AGG_LOAN_PERFORMANCE_MONTHLY : "office_id"
+    DIM_STAFF ||--o{ FCT_LOAN             : "loan_officer_id"
+    DIM_LOAN_PRODUCT ||--o{ FCT_LOAN      : "product_id"
+    DIM_LOAN_PRODUCT ||--o{ AGG_PORTFOLIO_SNAPSHOT_DAILY : "product_id"
+    DIM_LOAN_PRODUCT ||--o{ AGG_LOAN_PERFORMANCE_MONTHLY : "product_id"
+    FCT_LOAN ||--o{ FCT_LOAN_TRANSACTION  : "loan_id"
+    DIM_DATE ||--o{ FCT_LOAN              : "disbursement_date_key"
+    DIM_DATE ||--o{ FCT_LOAN_TRANSACTION  : "transaction_date_key"
+    FCT_LOAN_TRANSACTION }o--|| AGG_LOAN_PERFORMANCE_MONTHLY : "aggregated into"
+    FCT_LOAN }o--|| AGG_PORTFOLIO_SNAPSHOT_DAILY : "aggregated into"
+
+    %% =================================================================
+    %% Raw -> marts lineage (informational; not a physical FK)
+    %% =================================================================
+    CLIENTS ||--|| DIM_CLIENT        : "stg_fineract__clients -> dim_client"
+    OFFICES ||--|| DIM_OFFICE        : "stg_fineract__offices -> dim_office"
+    STAFF ||--|| DIM_STAFF           : "stg_fineract__staff -> dim_staff"
+    LOAN_PRODUCTS ||--|| DIM_LOAN_PRODUCT : "stg_fineract__loan_products -> dim_loan_product"
+    LOANS ||--|| FCT_LOAN            : "stg_fineract__loans -> fct_loan"
+    LOAN_TRANSACTIONS ||--|| FCT_LOAN_TRANSACTION : "stg_fineract__loan_transactions -> fct_loan_transaction"
+    SAVINGS_ACCOUNTS ||--|| FCT_SAVINGS_ACCOUNT : "stg_fineract__savings_accounts -> fct_savings_account"

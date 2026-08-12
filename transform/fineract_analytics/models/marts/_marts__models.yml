@@ -1,0 +1,172 @@
+version: 2
+
+models:
+  # ===================================================================
+  # core
+  # ===================================================================
+  - name: dim_date
+    description: >
+      Conformed date dimension generated from a numbers() spine between
+      the date_spine_start and date_spine_end project variables.
+    columns:
+      - name: date_day
+        description: The calendar date.
+        data_tests: [not_null, unique]
+      - name: date_key
+        description: YYYYMMDD integer key used by the facts.
+        data_tests: [not_null, unique]
+
+  - name: dim_client
+    description: >
+      Client dimension, current state (Type 1). History is available from
+      fineract_raw.cdc_audit rather than being duplicated here as an SCD.
+      Carries the client_segment definition used by every dashboard.
+    columns:
+      - name: client_id
+        description: Fineract client id.
+        data_tests: [not_null, unique]
+      - name: client_key
+        description: Surrogate key.
+        data_tests: [not_null, unique]
+      - name: client_segment
+        description: >
+          Prospect / Dormant / At risk / Watch / Repeat - performing /
+          New - performing. Defined once here rather than per BI tool.
+        data_tests:
+          - accepted_values:
+              values: ['Prospect', 'Dormant', 'At risk', 'Watch',
+                       'Repeat - performing', 'New - performing']
+      - name: office_id
+        description: Owning branch.
+        data_tests:
+          - relationships:
+              to: ref('dim_office')
+              field: office_id
+              config: { severity: warn }
+
+  - name: dim_office
+    description: Branch dimension with portfolio and staffing context attached.
+    columns:
+      - name: office_id
+        description: Fineract office id.
+        data_tests: [not_null, unique]
+      - name: par_ratio
+        description: Overdue balance as a share of the outstanding book.
+
+  - name: dim_staff
+    description: Loan officer dimension with book size and quality.
+    columns:
+      - name: staff_id
+        description: Fineract staff id.
+        data_tests: [not_null, unique]
+
+  - name: dim_loan_product
+    description: >
+      Loan product dimension: contracted terms next to realised
+      performance (uptake, PAR, write-off rate).
+    columns:
+      - name: product_id
+        description: Fineract loan product id.
+        data_tests: [not_null, unique]
+
+  - name: fct_loan
+    description: >
+      Loan fact, one row per account, current state. Sorted by
+      (disbursed_on_date, office_id, product_id, loan_id) to match the
+      real dashboard filter order, partitioned by disbursement month.
+    columns:
+      - name: loan_id
+        description: Fineract loan id.
+        data_tests: [not_null, unique]
+      - name: client_id
+        description: Borrower.
+        data_tests:
+          - relationships:
+              to: ref('dim_client')
+              field: client_id
+              config: { severity: warn }
+      - name: product_id
+        description: Loan product.
+        data_tests:
+          - relationships:
+              to: ref('dim_loan_product')
+              field: product_id
+              config: { severity: warn }
+      - name: total_outstanding
+        description: Principal plus interest still owed.
+        data_tests: [not_null]
+      - name: par30_exposure
+        description: Outstanding balance when the loan is 30+ days late, else 0.
+      - name: repayment_reconciliation_delta
+        description: >
+          Fineract's reported total_repayment minus the sum of the ledger
+          it should equal. Non-zero means CDC lost a transaction or the
+          source is internally inconsistent. Asserted by a singular test.
+
+  - name: fct_loan_transaction
+    description: >
+      Transaction fact, incremental on the CDC window. Measures are
+      pre-zeroed for reversed transactions so a naive SUM() is still
+      correct.
+    columns:
+      - name: transaction_id
+        description: Fineract transaction id.
+        data_tests: [not_null, unique]
+      - name: loan_id
+        description: Parent loan.
+        data_tests: [not_null]
+      - name: transaction_date
+        description: Value date.
+        data_tests: [not_null]
+
+  - name: fct_savings_account
+    description: >
+      Savings fact, one row per deposit account. Present because the
+      deposit relationship is a genuine credit signal in microfinance -
+      savings_to_debt_ratio feeds the scoring feature table - not just
+      for completeness.
+    columns:
+      - name: savings_id
+        description: Fineract savings account id.
+        data_tests: [not_null, unique]
+      - name: client_id
+        description: Account holder.
+      - name: savings_behaviour
+        description: >
+          Accumulating / Mixed / Transactional / Empty / Closed, derived
+          from the withdrawal ratio.
+        data_tests:
+          - accepted_values:
+              values: ['Closed', 'Empty', 'No activity', 'Transactional',
+                       'Mixed', 'Accumulating']
+
+  # ===================================================================
+  # finance
+  # ===================================================================
+  - name: agg_portfolio_snapshot_daily
+    description: >
+      Accumulating daily snapshot of the book by office x product. Exists
+      because Fineract reports only current balances - portfolio history
+      has to be accumulated, it cannot be derived after the fact.
+    columns:
+      - name: snapshot_key
+        description: Surrogate key of (snapshot_date, office_id, product_id).
+        data_tests: [not_null, unique]
+      - name: snapshot_date
+        description: The day the snapshot describes.
+        data_tests: [not_null]
+      - name: par30_ratio
+        description: PAR30 balance over total outstanding.
+
+  - name: agg_loan_performance_monthly
+    description: >
+      Monthly cash flow, originations and vintage quality by office x
+      product. Fully reproducible from history, so a rebuild ties out.
+    columns:
+      - name: month_start
+        description: First day of the reporting month.
+        data_tests: [not_null]
+      - name: vintage_default_rate
+        description: >
+          Share of loans originated in that month that have since gone
+          into default - the core input to credit-policy review.

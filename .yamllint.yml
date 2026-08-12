@@ -1,0 +1,48 @@
+# =====================================================================
+# yamllint config - relaxed but still catches real mistakes (bad indent,
+# duplicate keys, trailing whitespace). This repo's YAML is mostly
+# operational config (docker-compose.yml, dbt project/profile files,
+# Airflow-adjacent config, GitHub Actions) rather than hand-authored
+# data, so the defaults' strictness on line length and comment spacing
+# would produce noise without catching anything that breaks a build.
+# =====================================================================
+extends: default
+
+rules:
+  line-length:
+    max: 120
+    level: warning
+
+  # GitHub Actions' `on:` key is idiomatic YAML that the default
+  # truthy check flags as a boolean-looking key. `.github/workflows/`
+  # is exempted below via the rule's own `ignore`, scoped to just this
+  # rule rather than skipping the whole directory - a genuine accidental
+  # `yes`/`no`/`on`/`off` scalar elsewhere in a workflow file (e.g. a
+  # step's `if:` condition) still gets caught.
+  truthy:
+    check-keys: true
+    ignore: |
+      .github/workflows/
+
+  comments:
+    min-spaces-from-content: 1
+
+  comments-indentation: disable
+
+  document-start: disable
+
+  braces:
+    max-spaces-inside: 1
+
+  brackets:
+    max-spaces-inside: 1
+
+  indentation:
+    indent-sequences: consistent
+
+# Generated/vendored YAML, not hand-authored - nothing to lint here.
+ignore: |
+  target/
+  dbt_packages/
+  transform/fineract_analytics/target/
+  transform/fineract_analytics/dbt_packages/

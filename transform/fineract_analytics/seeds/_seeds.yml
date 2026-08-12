@@ -1,0 +1,25 @@
+version: 2
+
+seeds:
+  - name: seed_loan_status
+    description: >
+      Fineract loan status ids mapped to reporting groups. Seeded rather
+      than derived because the grouping (Pipeline / Book / Terminated) is
+      an institutional reporting choice, not something the source system
+      knows about.
+    columns:
+      - name: status_id
+        description: Fineract loan status id.
+        data_tests: [not_null, unique]
+      - name: status_group
+        description: Pipeline, Book or Terminated.
+
+  - name: seed_par_buckets
+    description: >
+      Portfolio-at-Risk bands with the provisioning rate applied to each.
+      Provision rates are a policy input that changes by board decision,
+      so they live in a reviewable CSV rather than buried in SQL.
+    columns:
+      - name: bucket_name
+        description: Bucket label, matching the par_bucket() macro output.
+        data_tests: [not_null, unique]

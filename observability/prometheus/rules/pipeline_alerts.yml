@@ -1,0 +1,190 @@
+# =====================================================================
+# pipeline_alerts.yml
+#
+# Alerts on the data pipeline itself: did the ingestion job run, did the
+# CDC stream keep up, and does the warehouse still agree with the source
+# of truth. Each alert's `runbook` annotation is the first concrete
+# action to take, not a link to go read documentation cold.
+# =====================================================================
+groups:
+  - name: fineract_pipeline_alerts
+    rules:
+      # ---------------------------------------------------------------
+      # Did it run?
+      # ---------------------------------------------------------------
+      - alert: IngestionStalled
+        expr: (time() - fineract_ingestion_last_success_timestamp_seconds) > 7200
+        for: 10m
+        labels:
+          severity: critical
+        annotations:
+          summary: "No successful ingestion run for {{ $labels.entity }} in over 2h"
+          description: >
+            {{ $labels.entity }} has not completed a successful load in
+            {{ $value | humanizeDuration }}. Downstream dbt models and
+            dashboards for this entity are now serving stale data.
+          runbook: >
+            Check the Airflow DAG run for the entity's ingestion task first
+            (scheduler may be stuck or the task may be queued behind a
+            retry backoff); if the task is not running at all, trigger it
+            manually with `airflow dags trigger fineract_ingestion`.
+
+      # ---------------------------------------------------------------
+      # Did it work?
+      # ---------------------------------------------------------------
+      - alert: IngestionFailed
+        expr: fineract_ingestion_run_status == 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Latest ingestion run for {{ $labels.entity }} failed"
+          description: >
+            The most recent load of {{ $labels.entity }} finished with
+            status=failed. It will be retried by Airflow, but if this
+            persists past one retry cycle it becomes IngestionStalled.
+          runbook: >
+            Read meta.ingestion_run.error_message for the latest run_id
+            of this entity, and check the ingestion job's container logs
+            for the corresponding batch_id.
+
+      # ---------------------------------------------------------------
+      # Was the data good?
+      # ---------------------------------------------------------------
+      - alert: IngestionRejectRateHigh
+        expr: increase(fineract_ingestion_rejected_rows_total[1h]) > 50
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High reject rate for {{ $labels.entity }}"
+          description: >
+            More than 50 records for {{ $labels.entity }} were quarantined
+            into meta.ingestion_reject in the last hour
+            ({{ $value | humanize }} rows). This usually means an upstream
+            Fineract schema or business-rule change the validators don't
+            know about yet.
+          runbook: >
+            SELECT rule, count(*) FROM meta.ingestion_reject WHERE entity =
+            '{{ $labels.entity }}' AND rejected_at > now() - interval '1
+            hour' GROUP BY rule ORDER BY 2 DESC; to find the dominant
+            failure rule, then inspect a few payload rows for that rule.
+
+      # ---------------------------------------------------------------
+      # CDC pipeline health
+      # ---------------------------------------------------------------
+      - alert: CDCSlotLagHigh
+        expr: fineract_cdc_replication_slot_lag_bytes > 536870912
+        for: 10m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Replication slot {{ $labels.slot }} is retaining over 512MB of WAL"
+          description: >
+            The consumer behind slot {{ $labels.slot }} has fallen behind
+            (or stopped), and Postgres is retaining WAL it cannot yet
+            discard. Left unchecked this fills the data disk and can take
+            the OLTP database down, not just analytics.
+          runbook: >
+            Run `make cdc-status` to check the Debezium connector's task
+            state; if tasks are FAILED, `make cdc-restart`. If Kafka
+            itself is down, this is expected and self-heals once Kafka
+            recovers - do not drop the slot.
+
+      - alert: CDCSlotInactive
+        expr: fineract_cdc_replication_slot_active == 0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Replication slot {{ $labels.slot }} has no active consumer"
+          description: >
+            No process is currently reading from slot {{ $labels.slot }}.
+            WAL will accumulate until a consumer reattaches or the slot is
+            dropped and the connector re-snapshots.
+          runbook: >
+            `make cdc-status` to confirm the connector is down, then `make
+            cdc-register` (idempotent) to restore it. If the slot's WAL
+            has already exceeded max_slot_wal_keep_size, Postgres will
+            have invalidated it - expect the connector to fail loudly and
+            require snapshot.mode=initial to recover (see cdc/README.md).
+
+      - alert: CDCFreshnessBreached
+        expr: fineract_cdc_freshness_seconds{table=~"loans|loan_transactions"} > 900
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "{{ $labels.table }} is more than 15 minutes stale in ClickHouse"
+          description: >
+            The newest row for {{ $labels.table }} in ClickHouse is
+            {{ $value | humanizeDuration }} behind its source commit time.
+            Loan balances and transaction facts are the tables portfolio
+            reporting depends on most directly.
+          runbook: >
+            Check job:cdc_lag_p95:max first to see if this is pipeline
+            latency (Kafka Connect backlog) versus a genuinely quiet
+            source; then check CDCSlotLagHigh/CDCSlotInactive for the
+            underlying cause.
+
+      - alert: CDCParseErrors
+        expr: increase(fineract_cdc_parse_errors_total[15m]) > 0
+        for: 0m
+        labels:
+          severity: warning
+        annotations:
+          summary: "CDC messages failing to parse on topic {{ $labels.topic }}"
+          description: >
+            {{ $value | humanize }} message(s) on {{ $labels.topic }} were
+            quarantined into fineract_raw.cdc_errors instead of being
+            applied. The data is not lost, but it is not in the raw layer
+            either until reprocessed.
+          runbook: >
+            SELECT * FROM fineract_raw.cdc_errors WHERE topic =
+            '{{ $labels.topic }}' ORDER BY observed_at DESC LIMIT 20; to
+            read the parser error and raw payload, then decide whether to
+            fix the materialized view or replay the message.
+
+      # ---------------------------------------------------------------
+      # Does the warehouse still agree with the source of truth?
+      # ---------------------------------------------------------------
+      - alert: ReconciliationMismatch
+        expr: fineract_reconciliation_row_delta != 0
+        for: 15m
+        labels:
+          severity: critical
+        annotations:
+          summary: "{{ $labels.entity }} row count mismatch between Postgres and ClickHouse"
+          description: >
+            Postgres and ClickHouse disagree on the live row count for
+            {{ $labels.entity }} by {{ $value | humanize }} rows, and the
+            mismatch has held for 15 minutes (longer than normal CDC lag
+            would explain). This is the signal that events were silently
+            dropped rather than merely delayed.
+          runbook: >
+            Confirm CDC lag/freshness for this table are otherwise
+            healthy (rules out "just slow"), then trigger an incremental
+            re-snapshot per cdc/README.md "ad-hoc re-snapshot of one
+            table without stopping the connector".
+
+      # ---------------------------------------------------------------
+      # Transform layer
+      # ---------------------------------------------------------------
+      - alert: DbtTestFailures
+        expr: fineract_dbt_test_failures > 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $value | humanize }} failing dbt test(s) in the {{ $labels.layer }} layer"
+          description: >
+            The most recent dbt run recorded failing tests in the
+            {{ $labels.layer }} layer. Marts built on top of this layer
+            may be propagating bad data.
+          runbook: >
+            SELECT test_name, model_name, message FROM
+            fineract_ops.dbt_test_results WHERE layer =
+            '{{ $labels.layer }}' AND status IN ('fail','error') AND
+            invocation_id = (SELECT invocation_id FROM
+            fineract_ops.dbt_test_results ORDER BY executed_at DESC LIMIT
+            1);

@@ -1,0 +1,93 @@
+<?xml version="1.0"?>
+<!--
+  =====================================================================
+  User profiles and quotas.
+
+  Two profiles, because a dbt build and a Grafana panel should fail in
+  different ways:
+
+    analytics_etl  - generous limits, long timeouts. A model build is
+                     allowed to take ten minutes and use half the box.
+    analytics_bi   - tight limits. A runaway dashboard query should fail
+                     fast and alone, rather than starving the merges that
+                     keep the raw layer collapsed.
+  =====================================================================
+-->
+<clickhouse>
+    <profiles>
+        <analytics_etl>
+            <max_execution_time>900</max_execution_time>
+            <max_memory_usage>6000000000</max_memory_usage>
+            <max_bytes_before_external_group_by>3000000000</max_bytes_before_external_group_by>
+            <max_bytes_before_external_sort>3000000000</max_bytes_before_external_sort>
+            <join_algorithm>auto</join_algorithm>
+            <max_threads>4</max_threads>
+            <!-- Retry-safe inserts: identical blocks are deduplicated. -->
+            <insert_deduplicate>1</insert_deduplicate>
+            <!-- Fail loudly on a bad cast rather than silently defaulting. -->
+            <input_format_null_as_default>0</input_format_null_as_default>
+            <log_queries>1</log_queries>
+        </analytics_etl>
+
+        <analytics_bi>
+            <max_execution_time>60</max_execution_time>
+            <max_memory_usage>2000000000</max_memory_usage>
+            <max_rows_to_read>500000000</max_rows_to_read>
+            <max_threads>2</max_threads>
+            <readonly>2</readonly>
+            <log_queries>1</log_queries>
+        </analytics_bi>
+    </profiles>
+
+    <quotas>
+        <analytics_quota>
+            <interval>
+                <duration>3600</duration>
+                <queries>0</queries>
+                <errors>0</errors>
+                <result_rows>0</result_rows>
+                <read_rows>0</read_rows>
+                <execution_time>0</execution_time>
+            </interval>
+        </analytics_quota>
+
+        <bi_quota>
+            <!-- Bounded per hour: one broken dashboard cannot monopolise
+                 the cluster for a whole afternoon. -->
+            <interval>
+                <duration>3600</duration>
+                <queries>10000</queries>
+                <errors>500</errors>
+                <result_rows>0</result_rows>
+                <read_rows>0</read_rows>
+                <execution_time>7200</execution_time>
+            </interval>
+        </bi_quota>
+    </quotas>
+
+    <users>
+        <!--
+          The ETL user. The password comes from CLICKHOUSE_PASSWORD via
+          the image's own entrypoint; this block only sets the profile,
+          quota and access scope.
+        -->
+        <analytics>
+            <profile>analytics_etl</profile>
+            <quota>analytics_quota</quota>
+            <networks><ip>::/0</ip></networks>
+            <access_management>1</access_management>
+        </analytics>
+
+        <!--
+          Read-only BI/Grafana user. Kept separate so a dashboard cannot
+          drop a table, and so BI query load is attributable in
+          system.query_log.
+        -->
+        <bi_reader>
+            <password>bi_reader</password>
+            <profile>analytics_bi</profile>
+            <quota>bi_quota</quota>
+            <networks><ip>::/0</ip></networks>
+        </bi_reader>
+    </users>
+</clickhouse>

@@ -1,0 +1,30 @@
+# =====================================================================
+# recording_rules.yml
+#
+# Pre-aggregates expressions that are both expensive (max/sum over a
+# label set) and evaluated repeatedly - once per alert rule tick and
+# again every time a Grafana dashboard panel refreshes. Recording them
+# once keeps both cheap and keeps the alert and the dashboard reading
+# from the same computed number.
+# =====================================================================
+groups:
+  - name: fineract_recording_rules
+    interval: 30s
+    rules:
+      # Worst-case CDC tail latency across every captured table - the
+      # number an on-call engineer actually wants at a glance.
+      - record: job:cdc_lag_p95:max
+        expr: max by (job) (fineract_cdc_lag_p95_seconds)
+
+      # Staleness of the least-fresh entity in the ingestion layer.
+      - record: job:ingestion_freshness_seconds:max
+        expr: max by (job) (time() - fineract_ingestion_last_success_timestamp_seconds)
+
+      # Merge pressure hotspot across all ClickHouse tables.
+      - record: job:clickhouse_active_parts:max
+        expr: max by (job) (fineract_clickhouse_active_parts)
+
+      # Largest reconciliation drift in either direction (missing rows
+      # show as negative, duplicated/over-counted rows as positive).
+      - record: job:reconciliation_row_delta:max_abs
+        expr: max by (job) (abs(fineract_reconciliation_row_delta))

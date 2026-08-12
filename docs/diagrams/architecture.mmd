@@ -1,0 +1,118 @@
+%%{ init: { "flowchart": { "curve": "linear" }, "theme": "neutral" } }%%
+flowchart LR
+
+    subgraph SRC["Source system (choose one)"]
+        direction TB
+        FIN_SELF["Fineract (self-hosted)\ndocker compose --profile fineract\nfineract:8443"]
+        FIN_DEMO["Public Apache demo\nFINERACT_BASE_URL=https://demo.mifos.io/..."]
+        FIN_MOCK["fineract-mock\ndocker compose --profile mock\nseeded, offline, deterministic"]
+    end
+
+    subgraph ING["Ingestion (ingestion service)"]
+        direction TB
+        INGEST["fineract_ingest\nREST client + validators + loader\npython -m fineract_ingest ingest --all"]
+    end
+
+    subgraph PG["Postgres OLTP landing (postgres:5432)"]
+        direction TB
+        OLTP["oltp.* tables\noffices, staff, loan_products,\nsavings_products, clients, loans,\nloan_transactions, savings_accounts"]
+        META["meta.* control plane\ningestion_watermark, ingestion_run,\ningestion_reject, data_quality_result"]
+        CDCSCHEMA["cdc.debezium_signal\ncdc.debezium_heartbeat"]
+        WAL["WAL (wal_level=logical)\npublication: fineract_cdc_pub\ndecoding plugin: pgoutput"]
+    end
+
+    subgraph CDC["CDC (kafka-connect:8083, Debezium 2.7)"]
+        direction TB
+        DBZ["fineract-oltp-source connector\nslot: fineract_cdc_slot\nsnapshot.mode=initial"]
+    end
+
+    subgraph KAFKA["Kafka (KRaft, kafka:9092)"]
+        direction TB
+        TOPICS["fineract.oltp.&lt;table&gt;\n8 topics, 7-day retention"]
+    end
+
+    subgraph CH["ClickHouse (clickhouse:8123/9000)"]
+        direction TB
+        KENG["fineract_raw.kafka_&lt;table&gt;\nKafka engine tables\n(consumer lives inside ClickHouse)"]
+        MVS["mv_&lt;table&gt; / mv_&lt;table&gt;_errors / mv_&lt;table&gt;_audit\nwire types -> analytical types"]
+        RAW["fineract_raw.&lt;table&gt;\nReplacingMergeTree(_version, _is_deleted)"]
+        ERR["fineract_raw.cdc_errors\npoison-message quarantine"]
+        AUDIT["fineract_raw.cdc_audit\nevery event, 90-day TTL"]
+        OPS["fineract_ops.*\nfreshness / lag / reconciliation views"]
+    end
+
+    subgraph DBT["dbt (transform/fineract_analytics)"]
+        direction TB
+        STG["staging\n1:1 with raw, dedup + cast + rename"]
+        INT["intermediate\nreusable business logic"]
+        MARTS["marts\ndim_*, fct_*, agg_*"]
+        ML["ml\npoint-in-time feature tables"]
+        STG --> INT --> MARTS --> ML
+    end
+
+    subgraph CONSUMERS["Consumers"]
+        direction TB
+        BI["BI / SQL clients\n(fineract_marts.*)"]
+        MLTRAIN["ML training\n(fineract_ml.*)"]
+        GRAF["Grafana dashboards\n(fineract_ops.*, exporter metrics)"]
+    end
+
+    subgraph ORCH["Orchestration"]
+        direction TB
+        AIRFLOW["Airflow\nfineract_analytics_pipeline DAG\npreflight -> ingest -> cdc_gate ->\ntransform -> test -> publish -> gate"]
+    end
+
+    subgraph OBS["Observability"]
+        direction TB
+        PROM["Prometheus\nscrapes every component"]
+        PGEXP["postgres-exporter"]
+        KEXP["kafka-exporter"]
+        PIPEXP["pipeline-exporter\n(freshness, CDC lag, reconciliation)"]
+        STATSDEXP["statsd-exporter\n(Airflow metrics)"]
+        PUSHGW["Pushgateway\n(batch job metrics)"]
+        GRAFANA["Grafana"]
+    end
+
+    FIN_SELF -.-> INGEST
+    FIN_DEMO -.-> INGEST
+    FIN_MOCK -.-> INGEST
+
+    INGEST -->|"INSERT ... ON CONFLICT DO UPDATE\n(_payload_hash gate)"| OLTP
+    INGEST --> META
+    OLTP --> WAL
+    CDCSCHEMA --> WAL
+    WAL -->|"logical replication slot"| DBZ
+    DBZ -->|"JSON, unwrap + route SMT"| TOPICS
+    TOPICS --> KENG
+    KENG --> MVS
+    MVS --> RAW
+    MVS --> ERR
+    MVS --> AUDIT
+    RAW --> OPS
+    AUDIT --> OPS
+
+    RAW --> STG
+    OPS -.->|"row-parity + freshness gate"| STG
+
+    MARTS --> BI
+    ML --> MLTRAIN
+    OPS --> GRAF
+
+    AIRFLOW -.orchestrates.-> INGEST
+    AIRFLOW -.orchestrates.-> STG
+    AIRFLOW -.orchestrates.-> INT
+    AIRFLOW -.orchestrates.-> MARTS
+    AIRFLOW -.orchestrates.-> ML
+    AIRFLOW -.->|"CDCCaughtUpSensor"| OPS
+
+    PROM --> PGEXP --> OLTP
+    PROM --> KEXP --> TOPICS
+    PROM --> PIPEXP
+    PIPEXP --> OPS
+    PIPEXP --> META
+    PROM --> STATSDEXP --> AIRFLOW
+    PUSHGW --> PROM
+    INGEST -.pushes batch metrics.-> PUSHGW
+    AIRFLOW -.pushes run metrics.-> PUSHGW
+    PROM --> GRAFANA
+    GRAFANA --> GRAF

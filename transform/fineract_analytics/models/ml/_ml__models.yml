@@ -1,0 +1,59 @@
+version: 2
+
+models:
+  - name: ml_loan_default_features
+    description: >
+      Point-in-time-correct training dataset for probability of default at
+      origination. Every feature is computed strictly from information
+      that existed before the loan's disbursement date; the loan's own
+      post-origination behaviour is deliberately absent because it would
+      leak the label.
+    columns:
+      - name: loan_id
+        description: Identifier. Not a feature - exclude from training.
+        data_tests: [not_null, unique]
+      - name: observation_date
+        description: The loan's disbursement date. All features are as of this date.
+        data_tests: [not_null]
+      - name: label_defaulted
+        description: >
+          1 when the loan later reached the default threshold in days past
+          due or was written off. The only forward-looking column.
+        data_tests:
+          - not_null
+          - accepted_values: { values: [0, 1] }
+      - name: is_label_mature
+        description: >
+          0 for loans too young to have shown default behaviour. Filter on
+          this before training or the model learns "new loans never
+          default".
+        data_tests:
+          - accepted_values: { values: [0, 1] }
+      - name: split_hint
+        description: >
+          Time-based train/validation/test split. Random splitting leaks
+          the future into training for a temporally ordered process.
+        data_tests:
+          - accepted_values: { values: ['train', 'validation', 'test'] }
+      - name: feat_prior_write_off_rate
+        description: Share of the borrower's earlier loans that were written off.
+      - name: feat_is_first_time_borrower
+        description: 1 when there is no prior loan history at all.
+
+  - name: ml_client_scoring_features
+    description: >
+      Serving-side feature table, one row per client as of the scoring
+      date. Shares feature names with the training table where the
+      definitions match. Contains current-state columns that would be
+      leakage in training - which is exactly why it is a separate model.
+    columns:
+      - name: client_id
+        description: Client scored.
+        data_tests: [not_null, unique]
+      - name: scoring_date
+        description: The date these features describe.
+        data_tests: [not_null]
+      - name: needs_collections_review
+        description: 1 when the client has any loan in arrears today.
+        data_tests:
+          - accepted_values: { values: [0, 1] }
