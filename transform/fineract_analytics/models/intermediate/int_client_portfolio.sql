@@ -2,7 +2,8 @@
     config(
         materialized='table',
         engine='MergeTree()',
-        order_by='(client_id)'
+        order_by='(client_id)',
+        settings={'allow_nullable_key': 1}
     )
 }}
 

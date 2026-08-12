@@ -3,7 +3,8 @@
         materialized='table',
         engine='MergeTree()',
         partition_by='toYYYYMM(month_start)',
-        order_by='(month_start, office_id, product_id)'
+        order_by='(month_start, office_id, product_id)',
+        settings={'allow_nullable_key': 1}
     )
 }}
 

@@ -11,6 +11,10 @@
 -->
 <clickhouse>
 
+    <!-- Accept connections from dbt, Grafana and exporters on the Compose
+         network; the container publishes only explicitly mapped ports. -->
+    <listen_host>0.0.0.0</listen_host>
+
     <!--
       Native Prometheus endpoint. ClickHouse can expose its own metrics
       without an exporter sidecar; `asynchronous_metrics` is what carries
@@ -40,7 +44,9 @@
       merges compete for these: starve the merge pool and duplicate
       versions accumulate faster than they collapse.
     -->
-    <background_pool_size>8</background_pool_size>
+    <!-- ClickHouse 24.8 defaults require at least 20 free entries for
+         mutations, so this pool must not be configured below 20. -->
+    <background_pool_size>20</background_pool_size>
     <background_schedule_pool_size>8</background_schedule_pool_size>
     <background_message_broker_schedule_pool_size>8</background_message_broker_schedule_pool_size>
 

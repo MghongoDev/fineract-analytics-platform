@@ -41,7 +41,7 @@ with source as (
 
     select *
     from {{ source('fineract_raw', 'loan_transactions') }}
-    where {{ incremental_cdc_filter('_source_commit_at') }}
+    where {{ incremental_cdc_filter('_source_commit_at', 'cdc_commit_at') }}
 
 ),
 

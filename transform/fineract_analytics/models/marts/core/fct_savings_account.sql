@@ -3,7 +3,7 @@
         materialized='table',
         engine='MergeTree()',
         order_by='(office_id, product_id, savings_id)',
-        settings={'index_granularity': 8192}
+        settings={'index_granularity': 8192, 'allow_nullable_key': 1}
     )
 }}
 

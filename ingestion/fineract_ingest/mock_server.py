@@ -332,7 +332,13 @@ class FineractDataset:
             }]
             tx_id += 1
 
-            installments = max(1, int(loan["numberOfRepayments"] * loan["_progress"]))
+            scheduled_installments = max(
+                0, (self.as_of - loan["_disbursed"]).days // 30
+            )
+            installments = min(
+                scheduled_installments,
+                max(1, int(loan["numberOfRepayments"] * loan["_progress"])),
+            )
             balance = float(loan["principal"])
             per_principal = float(loan["principal"]) / max(1, loan["numberOfRepayments"])
             per_interest = float(loan["summary"]["interestCharged"]) / max(1, loan["numberOfRepayments"])

@@ -6,7 +6,7 @@
         engine='MergeTree()',
         partition_by='toYYYYMM(snapshot_date)',
         order_by='(snapshot_date, office_id, product_id)',
-        settings={'index_granularity': 8192}
+        settings={'index_granularity': 8192, 'allow_nullable_key': 1}
     )
 }}
 

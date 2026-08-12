@@ -59,7 +59,8 @@ mappings:
     match_metric_type: counter
 
   # airflow.task_instance_created-<operator_class> - fan-out per operator.
-  - match: "airflow.task_instance_created-*"
+  - match: "airflow\\.task_instance_created-(.*)"
+    match_type: regex
     name: "airflow_task_instance_created_total"
     match_metric_type: counter
     labels:
