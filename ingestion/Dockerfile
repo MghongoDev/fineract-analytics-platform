@@ -5,7 +5,7 @@
 # carries no compiler toolchain. Runs as a non-root user - a job that only
 # needs to read an API and write to Postgres has no business being root.
 # =====================================================================
-FROM python:3.11-slim AS builder
+FROM python:3.14-slim AS builder
 
 ENV PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1
@@ -15,7 +15,7 @@ COPY requirements.txt .
 RUN pip wheel --wheel-dir /wheels -r requirements.txt
 
 
-FROM python:3.11-slim AS runtime
+FROM python:3.14-slim AS runtime
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
