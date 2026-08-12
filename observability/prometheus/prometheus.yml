@@ -1,0 +1,78 @@
+# =====================================================================
+# prometheus.yml - scrape configuration for the analytics platform.
+#
+# 15s scrape_interval keeps alert `for:` windows meaningful without
+# generating more series churn than the demo stack's single-node
+# Prometheus needs to hold. Every alerting and recording rule lives under
+# rules/ and is loaded below.
+# =====================================================================
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    platform: fineract-analytics
+
+rule_files:
+  - rules/*.yml
+
+scrape_configs:
+  # Prometheus scraping itself - the baseline "is monitoring monitoring
+  # itself" signal; if this target goes missing, nothing else can be trusted.
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9090"]
+
+  # The custom exporter in observability/exporter - control-plane and
+  # warehouse observability views that only exist as query results.
+  - job_name: pipeline-exporter
+    static_configs:
+      - targets: ["pipeline-exporter:9105"]
+
+  # Batch jobs (the ingestion job) cannot be scraped - they start, run,
+  # exit. They push their final metric values here instead. honor_labels
+  # is required for a pushgateway target: without it, Prometheus overwrites
+  # the `job`/`instance` labels the pushed client set (job=fineract_ingestion,
+  # entity=<name>) with the scrape target's own job/instance, which would
+  # collapse every entity's series into one and break every alert keyed on
+  # `entity`.
+  - job_name: pushgateway
+    honor_labels: true
+    static_configs:
+      - targets: ["pushgateway:9091"]
+
+  - job_name: postgres-exporter
+    static_configs:
+      - targets: ["postgres-exporter:9187"]
+
+  - job_name: kafka-exporter
+    static_configs:
+      - targets: ["kafka-exporter:9308"]
+
+  # ClickHouse's own native Prometheus endpoint (asynchronous_metrics,
+  # events, metrics system tables) - no separate exporter needed.
+  - job_name: clickhouse
+    static_configs:
+      - targets: ["clickhouse:9363"]
+
+  # Kafka Connect (Debezium) JMX metrics via the JMX exporter javaagent.
+  - job_name: kafka-connect
+    static_configs:
+      - targets: ["kafka-connect:9404"]
+
+  # Airflow emits StatsD, not Prometheus - statsd-exporter relays it. See
+  # observability/statsd/statsd-mapping.yml for the metric name mapping.
+  - job_name: airflow-statsd
+    static_configs:
+      - targets: ["statsd-exporter:9102"]
+
+  # Apache Fineract exposes Spring Boot actuator metrics (Micrometer) on
+  # its own HTTPS management port; the demo image ships a self-signed
+  # certificate, so verification is skipped here rather than baking a CA
+  # into Prometheus for a non-production core-banking sandbox.
+  - job_name: fineract
+    scheme: https
+    metrics_path: /actuator/prometheus
+    tls_config:
+      insecure_skip_verify: true
+    static_configs:
+      - targets: ["fineract:8443"]

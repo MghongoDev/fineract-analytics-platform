@@ -1,0 +1,20 @@
+# =====================================================================
+# dashboards.yml - file provider.
+#
+# Dashboards are checked into git under observability/grafana/dashboards
+# and loaded from disk rather than clicked together in the UI, so a
+# dashboard change goes through the same review as any other code change.
+# =====================================================================
+apiVersion: 1
+
+providers:
+  - name: fineract-dashboards
+    orgId: 1
+    folder: "Fineract Pipeline"
+    type: file
+    disableDeletion: false
+    updateIntervalSeconds: 30
+    allowUiUpdates: false
+    options:
+      path: /var/lib/grafana/dashboards
+      foldersFromFilesStructure: false

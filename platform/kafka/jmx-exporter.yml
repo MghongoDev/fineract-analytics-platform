@@ -1,0 +1,89 @@
+# =====================================================================
+# JMX -> Prometheus mapping for Kafka Connect / Debezium.
+#
+# Debezium publishes its most operationally important numbers only over
+# JMX: how far behind the connector is, how full its internal queue is,
+# and how long since it last saw an event. Without this agent those live
+# in a JVM nobody can query, and the first sign of trouble is a stale
+# dashboard.
+#
+# `lowercaseOutputName` keeps metric names conventional; the explicit
+# whitelist keeps the scrape small - a full JMX dump from a Connect JVM
+# is thousands of series, most of them noise.
+# =====================================================================
+lowercaseOutputName: true
+lowercaseOutputLabelNames: true
+
+whitelistObjectNames:
+  - "debezium.postgres:type=connector-metrics,*"
+  - "kafka.connect:type=connect-worker-metrics"
+  - "kafka.connect:type=connect-worker-metrics,*"
+  - "kafka.connect:type=connect-worker-rebalance-metrics"
+  - "kafka.connect:type=connector-task-metrics,*"
+  - "kafka.connect:type=source-task-metrics,*"
+  - "kafka.producer:type=producer-metrics,*"
+  - "java.lang:type=Memory"
+  - "java.lang:type=GarbageCollector,*"
+
+rules:
+  # -------------------------------------------------------------------
+  # Debezium connector metrics. MilliSecondsBehindSource is the closest
+  # thing to a single "is CDC healthy" number: it is the gap between the
+  # source commit and the connector reading it.
+  # -------------------------------------------------------------------
+  - pattern: 'debezium.postgres<type=connector-metrics, context=(.+), server=(.+), key=(.+)><>(MilliSecondsBehindSource|MilliSecondsSinceLastEvent|TotalNumberOfEventsSeen|NumberOfCommittedTransactions|QueueTotalCapacity|QueueRemainingCapacity|SnapshotCompleted|SnapshotRunning|NumberOfDisconnects)'
+    name: debezium_metrics_$4
+    labels:
+      context: "$1"
+      server: "$2"
+      key: "$3"
+    type: GAUGE
+
+  - pattern: 'debezium.postgres<type=connector-metrics, context=(.+), server=(.+)><>(MilliSecondsBehindSource|MilliSecondsSinceLastEvent|TotalNumberOfEventsSeen|NumberOfCommittedTransactions|QueueTotalCapacity|QueueRemainingCapacity|Connected|SnapshotCompleted|SnapshotRunning)'
+    name: debezium_metrics_$3
+    labels:
+      context: "$1"
+      server: "$2"
+    type: GAUGE
+
+  # -------------------------------------------------------------------
+  # Connect worker and task health. A task in a non-RUNNING state is the
+  # thing that stops the stream while the connector still reports up.
+  # -------------------------------------------------------------------
+  - pattern: 'kafka.connect<type=connect-worker-metrics, connector=(.+)><>([a-z-]+)'
+    name: kafka_connect_worker_$2
+    labels:
+      connector: "$1"
+    type: GAUGE
+
+  - pattern: 'kafka.connect<type=connect-worker-metrics><>([a-z-]+)'
+    name: kafka_connect_worker_$1
+    type: GAUGE
+
+  - pattern: 'kafka.connect<type=connector-task-metrics, connector=(.+), task=(\d+)><>([a-z-]+)'
+    name: kafka_connect_task_$3
+    labels:
+      connector: "$1"
+      task: "$2"
+    type: GAUGE
+
+  - pattern: 'kafka.connect<type=source-task-metrics, connector=(.+), task=(\d+)><>([a-z-]+)'
+    name: kafka_connect_source_task_$3
+    labels:
+      connector: "$1"
+      task: "$2"
+    type: GAUGE
+
+  # -------------------------------------------------------------------
+  # JVM basics: a Connect worker that is GC-thrashing looks like a slow
+  # CDC pipeline until you look here.
+  # -------------------------------------------------------------------
+  - pattern: 'java.lang<type=Memory><HeapMemoryUsage>(\w+)'
+    name: jvm_memory_heap_$1_bytes
+    type: GAUGE
+
+  - pattern: 'java.lang<type=GarbageCollector, name=(.+)><>CollectionTime'
+    name: jvm_gc_collection_time_ms
+    labels:
+      gc: "$1"
+    type: COUNTER

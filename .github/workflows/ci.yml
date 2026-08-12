@@ -1,0 +1,670 @@
+name: CI
+
+# Every push to a long-lived branch and every PR gets the full graph.
+# workflow_dispatch lets an operator re-run the whole thing by hand (e.g.
+# after a flaky external dependency) without pushing an empty commit.
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+  workflow_dispatch: {}
+
+# A new push to the same PR/branch supersedes the in-flight run instead of
+# queueing behind it - CI minutes are not free and a stale run's result is
+# not useful once new commits exist.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  PYTHON_VERSION: "3.11"
+
+jobs:
+  # ---------------------------------------------------------------------
+  lint:
+    name: Lint (ruff, yamllint, shellcheck, sqlfluff)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install lint tooling
+        run: pip install ruff yamllint sqlfluff sqlfluff-templater-jinja
+
+      - name: ruff check (ingestion, orchestration, observability, scripts)
+        run: |
+          targets=""
+          for dir in ingestion orchestration observability scripts; do
+            [ -d "$dir" ] && targets="$targets $dir"
+          done
+          echo "linting:$targets"
+          ruff check $targets
+
+      - name: ruff format --check (ingestion, orchestration, observability, scripts)
+        run: |
+          targets=""
+          for dir in ingestion orchestration observability scripts; do
+            [ -d "$dir" ] && targets="$targets $dir"
+          done
+          ruff format --check $targets
+
+      - name: yamllint all YAML
+        run: |
+          yamllint -d "{extends: default, rules: {line-length: {max: 140}, document-start: disable, truthy: {allowed-values: ['true','false','on','off']}}}" \
+            $(git ls-files '*.yml' '*.yaml')
+
+      - name: shellcheck (cdc/scripts and scripts/*.sh)
+        run: |
+          sudo apt-get update -y && sudo apt-get install -y shellcheck
+          files=$(find cdc/scripts scripts -maxdepth 2 -name '*.sh' 2>/dev/null || true)
+          if [ -z "$files" ]; then
+            echo "no shell scripts found, nothing to check"
+          else
+            shellcheck $files
+          fi
+
+      # sqlfluff is templater-happy but not project-aware: it does not
+      # know dbt's ref()/source()/config() macros, so it produces false
+      # positives on perfectly valid Jinja that a human (and
+      # scripts/validate_dbt_sql.py, which actually renders and runs the
+      # SQL) would accept. It stays informational rather than blocking so
+      # a real style regression is visible without holding up merges on
+      # noise.
+      - name: sqlfluff lint dbt models (non-blocking, see comment above)
+        continue-on-error: true
+        working-directory: transform/fineract_analytics
+        run: |
+          pip install dbt-core dbt-clickhouse
+          cat > .sqlfluff <<'EOF'
+          [sqlfluff]
+          dialect = clickhouse
+          templater = jinja
+          max_line_length = 140
+
+          [sqlfluff:templater:jinja]
+          apply_dbt_builtins = true
+          EOF
+          sqlfluff lint models --dialect clickhouse --templater jinja
+
+  # ---------------------------------------------------------------------
+  unit-tests:
+    name: Unit tests (pytest + coverage)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+
+      - name: Install ingestion package with dev extras
+        run: pip install -e "ingestion[dev]"
+
+      - name: Install repo-level pytest deps (if a top-level unit test suite exists)
+        run: |
+          if [ -d tests/unit ]; then pip install pytest pytest-cov; fi
+
+      - name: Run pytest with coverage
+        run: |
+          mkdir -p tests/unit
+          pytest ingestion/tests tests/unit -v \
+            --cov=fineract_ingest --cov-report=xml --cov-report=term \
+            --cov-fail-under=70
+
+      - name: Upload coverage report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: coverage-xml
+          path: coverage.xml
+          if-no-files-found: warn
+
+  # ---------------------------------------------------------------------
+  sql-validation:
+    name: SQL validation (embedded ClickHouse via chdb)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+
+      - name: Install validation dependencies
+        run: pip install chdb jinja2 pyyaml
+
+      # chdb embeds the real ClickHouse engine as a library, so both
+      # scripts below execute actual ClickHouse DDL and the whole dbt DAG
+      # in-process - no server, no containers, no network. That is what
+      # makes it cheap enough to run on every single push instead of only
+      # nightly: the entire pipeline is validated in a couple of seconds.
+      - name: Validate ClickHouse DDL (scripts/validate_clickhouse_sql.py)
+        run: python scripts/validate_clickhouse_sql.py
+
+      - name: Build the dbt DAG and run data tests (scripts/validate_dbt_sql.py)
+        run: python scripts/validate_dbt_sql.py --verbose
+
+  # ---------------------------------------------------------------------
+  dbt-checks:
+    name: dbt checks (parse, docs, governance gate)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: transform/fineract_analytics
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+
+      - name: Install dbt-core and dbt-clickhouse
+        run: pip install dbt-core dbt-clickhouse
+
+      - name: dbt deps
+        run: dbt deps
+
+      # dbt parse only needs Jinja to render and the DAG to resolve - no
+      # warehouse connection required, so it is a fast, cheap gate on
+      # every push. The credentials below are dummies; nothing is queried.
+      - name: dbt parse
+        env:
+          DBT_TARGET: ci
+          CLICKHOUSE_HOST: localhost
+          CLICKHOUSE_HTTP_PORT: "8123"
+          CLICKHOUSE_USER: default
+          CLICKHOUSE_PASSWORD: ""
+          CLICKHOUSE_DATABASE: fineract_ci
+        run: dbt parse
+
+      - name: dbt docs generate (no compile, no warehouse)
+        env:
+          DBT_TARGET: ci
+          CLICKHOUSE_HOST: localhost
+          CLICKHOUSE_HTTP_PORT: "8123"
+          CLICKHOUSE_USER: default
+          CLICKHOUSE_PASSWORD: ""
+          CLICKHOUSE_DATABASE: fineract_ci
+        run: dbt docs generate --no-compile
+
+      # Real governance gate, not a style nit: a mart with no description
+      # is undiscoverable in the catalogue, and a staging model with zero
+      # tests means the very first line of defense against a broken CDC
+      # feed is silently absent. Both are cheap to prevent and expensive
+      # to find out about from a stakeholder.
+      - name: Assert every model has a description and staging models are tested
+        run: |
+          python3 - <<'PYEOF'
+          import json
+          import sys
+
+          with open("target/manifest.json") as fh:
+              manifest = json.load(fh)
+
+          nodes = manifest["nodes"]
+          models = {
+              uid: node
+              for uid, node in nodes.items()
+              if node.get("resource_type") == "model"
+          }
+
+          missing_description = sorted(
+              node["unique_id"]
+              for node in models.values()
+              if not (node.get("description") or "").strip()
+          )
+
+          # A model is "tested" if it, or at least one of its columns, is
+          # the parent of a generic test node, or a singular test's
+          # depends_on includes it directly.
+          tested_model_ids = set()
+          for uid, node in nodes.items():
+              if node.get("resource_type") != "test":
+                  continue
+              for parent in node.get("depends_on", {}).get("nodes", []):
+                  tested_model_ids.add(parent)
+
+          untested_staging = sorted(
+              node["unique_id"]
+              for uid, node in models.items()
+              if node.get("path", "").startswith("staging/")
+              and uid not in tested_model_ids
+          )
+
+          failures = []
+          if missing_description:
+              failures.append(
+                  "Models missing a description:\n  - "
+                  + "\n  - ".join(missing_description)
+              )
+          if untested_staging:
+              failures.append(
+                  "Staging models with zero data tests:\n  - "
+                  + "\n  - ".join(untested_staging)
+              )
+
+          if failures:
+              print("Governance gate FAILED:\n")
+              print("\n\n".join(failures))
+              sys.exit(1)
+
+          print(f"Governance gate OK: {len(models)} models documented and "
+                f"all staging models tested.")
+          PYEOF
+
+  # ---------------------------------------------------------------------
+  integration-tests:
+    name: Integration tests (ingestion -> Postgres -> ClickHouse)
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request' || github.ref == 'refs/heads/main'
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_USER: postgres
+          POSTGRES_DB: fineract_oltp
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+      clickhouse:
+        image: clickhouse/clickhouse-server:24.8-alpine
+        ports: ["8123:8123", "9000:9000"]
+        env:
+          CLICKHOUSE_SKIP_USER_SETUP: "1"
+        options: >-
+          --health-cmd "wget -qO- http://localhost:8123/ping || exit 1"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+
+      - name: Install ingestion package with dev extras
+        run: pip install -e "ingestion[dev]"
+
+      - name: Apply Postgres init SQL (roles, OLTP schema, control plane, CDC publication)
+        env:
+          PGPASSWORD: postgres
+        run: |
+          for f in platform/postgres/init/*.sql; do
+            echo "applying $f"
+            psql -h localhost -U postgres -d fineract_oltp -v ON_ERROR_STOP=1 -f "$f"
+          done
+
+      # 02_kafka_sources.sql and 04_materialized_views.sql define
+      # ENGINE = Kafka tables and the materialized views that read from
+      # them. There is no Kafka broker in this job (CDC is exercised
+      # separately by scripts/validate_clickhouse_sql.py against chdb),
+      # so applying them against a real, brokerless ClickHouse server
+      # would just fail waiting for a connection. Everything else -
+      # databases, raw tables, ops views - is real DDL against a real
+      # server and is applied normally.
+      - name: Apply ClickHouse init SQL (skipping Kafka source + MV files, no broker in CI)
+        run: |
+          for f in platform/clickhouse/init/*.sql; do
+            base=$(basename "$f")
+            case "$base" in
+              02_kafka_sources.sql|04_materialized_views.sql)
+                echo "skipping $base (requires a Kafka broker, not available in CI)"
+                continue
+                ;;
+            esac
+            echo "applying $base"
+            curl -fsS "http://localhost:8123/" --data-binary @"$f"
+          done
+
+      - name: Start mock Fineract server
+        run: |
+          python -m fineract_ingest.mock_server --port 8090 --clients 200 --loans 400 &
+          echo $! > mock_server.pid
+          for i in $(seq 1 30); do
+            curl -fsS "http://localhost:8090/fineract-provider/api/v1/offices" -u mifos:password && break
+            sleep 1
+          done
+
+      - name: Run ingestion end-to-end against the mock server
+        env:
+          FINERACT_BASE_URL: http://localhost:8090/fineract-provider/api/v1
+          FINERACT_USERNAME: mifos
+          FINERACT_PASSWORD: password
+          FINERACT_VERIFY_SSL: "false"
+          POSTGRES_HOST: localhost
+          POSTGRES_PORT: "5432"
+          POSTGRES_DB: fineract_oltp
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          INGEST_PUSH_METRICS: "false"
+        run: python -m fineract_ingest ingest --all
+
+      - name: Assert row counts landed in Postgres
+        env:
+          PGPASSWORD: postgres
+        run: |
+          set -euo pipefail
+          declare -A tables=(
+            [oltp.offices]=1
+            [oltp.staff]=1
+            [oltp.loan_products]=1
+            [oltp.savings_products]=1
+            [oltp.clients]=1
+            [oltp.loans]=1
+            [oltp.loan_transactions]=1
+            [oltp.savings_accounts]=1
+          )
+          for table in "${!tables[@]}"; do
+            count=$(psql -h localhost -U postgres -d fineract_oltp -tAc "SELECT count(*) FROM ${table}")
+            echo "${table}: ${count} rows"
+            if [ "${count}" -lt "${tables[$table]}" ]; then
+              echo "::error::${table} has ${count} rows, expected at least ${tables[$table]}"
+              exit 1
+            fi
+          done
+
+      - name: Stop mock Fineract server
+        if: always()
+        run: kill "$(cat mock_server.pid)" 2>/dev/null || true
+
+      - name: Run integration test suite
+        env:
+          POSTGRES_HOST: localhost
+          POSTGRES_PORT: "5432"
+          POSTGRES_DB: fineract_oltp
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          CLICKHOUSE_HOST: localhost
+          CLICKHOUSE_HTTP_PORT: "8123"
+        run: |
+          mkdir -p tests/integration
+          pytest tests/integration -v
+
+  # ---------------------------------------------------------------------
+  connector-config-validation:
+    name: Debezium connector config validation
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      # A typo in a Debezium connector config (wrong plugin.name, a
+      # forgotten heartbeat, decimal.handling.mode left at the 'precise'
+      # default) does not fail the PUT to Kafka Connect - it registers
+      # fine and only shows up hours later as silently wrong money values
+      # or a WAL that never drains. That failure mode is invisible in
+      # review, so it is enforced here as a build gate instead.
+      - name: Validate every cdc/debezium/*-connector.json
+        run: |
+          python3 - <<'PYEOF'
+          import glob
+          import json
+          import sys
+
+          failures = []
+
+          for path in sorted(glob.glob("cdc/debezium/*-connector.json")):
+              with open(path) as fh:
+                  doc = json.load(fh)
+
+              config = {
+                  k: v for k, v in doc.get("config", {}).items()
+                  if not k.startswith("//")
+              }
+
+              def require(key, expected=None, predicate=None, label=None):
+                  if key not in config:
+                      failures.append(f"{path}: missing required key '{key}'")
+                      return
+                  value = config[key]
+                  if expected is not None and value != expected:
+                      failures.append(
+                          f"{path}: '{key}' = {value!r}, expected {expected!r}")
+                  if predicate is not None and not predicate(value):
+                      failures.append(
+                          f"{path}: '{key}' = {value!r} failed check: "
+                          f"{label or predicate}")
+
+              require("connector.class")
+              require("plugin.name", expected="pgoutput")
+              require("decimal.handling.mode", expected="string")
+              require("publication.autocreate.mode", expected="filtered")
+              require("snapshot.mode")
+              require("heartbeat.interval.ms",
+                      predicate=lambda v: int(v) > 0,
+                      label="heartbeat.interval.ms must be a positive integer")
+
+              transforms = config.get("transforms", "")
+              if "unwrap" not in transforms.split(","):
+                  failures.append(f"{path}: transforms must include 'unwrap'")
+              require("transforms.unwrap.type",
+                      expected="io.debezium.transforms.ExtractNewRecordState")
+              require("transforms.unwrap.delete.handling.mode", expected="rewrite")
+
+              print(f"{path}: OK ({len(config)} config keys)")
+
+          if failures:
+              print("\nconnector config validation FAILED:", file=sys.stderr)
+              for failure in failures:
+                  print(f"  - {failure}", file=sys.stderr)
+              sys.exit(1)
+          PYEOF
+
+  # ---------------------------------------------------------------------
+  compose-validation:
+    name: Compose file validation
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: docker compose config -q
+        run: |
+          if [ ! -f docker-compose.yml ]; then
+            echo "::warning::docker-compose.yml not present yet, skipping compose validation"
+            exit 0
+          fi
+          docker compose -f docker-compose.yml config -q
+
+      - name: Assert every service has a healthcheck (or a documented reason not to)
+        run: |
+          if [ ! -f docker-compose.yml ]; then
+            echo "::warning::docker-compose.yml not present yet, skipping healthcheck audit"
+            exit 0
+          fi
+          python3 - <<'PYEOF'
+          import sys
+          import yaml
+
+          with open("docker-compose.yml") as fh:
+              raw = fh.read()
+          doc = yaml.safe_load(raw)
+
+          failures = []
+          for name, service in (doc.get("services") or {}).items():
+              if "healthcheck" in service:
+                  continue
+              # A service without a healthcheck must say why in a comment
+              # directly above its top-level key, e.g. "# no-healthcheck:
+              # short-lived batch job, exits on completion".
+              marker = f"{name}:"
+              lines = raw.splitlines()
+              documented = False
+              for i, line in enumerate(lines):
+                  if line.strip().rstrip(":") == name and line.rstrip().endswith(":"):
+                      for back in range(1, 4):
+                          if i - back < 0:
+                              break
+                          prev = lines[i - back].strip()
+                          if prev.startswith("#") and "no-healthcheck" in prev:
+                              documented = True
+                          if prev and not prev.startswith("#"):
+                              break
+                      break
+              if not documented:
+                  failures.append(name)
+
+          if failures:
+              print("Services with no healthcheck and no '# no-healthcheck: <reason>' comment:")
+              for name in failures:
+                  print(f"  - {name}")
+              sys.exit(1)
+          print("All services have a healthcheck or a documented exemption.")
+          PYEOF
+
+  # ---------------------------------------------------------------------
+  build-images:
+    name: Build image (${{ matrix.image }})
+    runs-on: ubuntu-latest
+    needs: [lint, unit-tests, sql-validation]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - image: ingestion
+            context: ingestion
+            dockerfile: ingestion/Dockerfile
+          - image: orchestration-airflow
+            context: orchestration
+            dockerfile: orchestration/Dockerfile
+          - image: observability-exporter
+            context: observability/exporter
+            dockerfile: observability/exporter/Dockerfile
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Check whether ${{ matrix.dockerfile }} exists yet
+        id: exists
+        run: |
+          if [ -f "${{ matrix.dockerfile }}" ]; then
+            echo "found=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::${{ matrix.dockerfile }} does not exist yet, skipping build for ${{ matrix.image }}"
+            echo "found=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Set up Docker Buildx
+        if: steps.exists.outputs.found == 'true'
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to ghcr.io
+        if: steps.exists.outputs.found == 'true' && github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Compute image tags
+        if: steps.exists.outputs.found == 'true'
+        id: tags
+        run: |
+          repo_lower=$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')
+          echo "image_ref=ghcr.io/${repo_lower}/${{ matrix.image }}" >> "$GITHUB_OUTPUT"
+
+      # Never push on pull_request: a fork PR must not be able to publish
+      # to the registry. Push only happens from main, after the SHA has
+      # already gone through every other job via `needs:`.
+      - name: Build (and push on main) ${{ matrix.image }}
+        if: steps.exists.outputs.found == 'true'
+        uses: docker/build-push-action@v5
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.dockerfile }}
+          push: ${{ github.ref == 'refs/heads/main' && github.event_name != 'pull_request' }}
+          tags: |
+            ${{ steps.tags.outputs.image_ref }}:${{ github.sha }}
+            ${{ steps.tags.outputs.image_ref }}:latest
+          cache-from: type=gha,scope=${{ matrix.image }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.image }}
+          load: ${{ github.ref != 'refs/heads/main' || github.event_name == 'pull_request' }}
+
+      - name: Scan image for vulnerabilities (Trivy, fail on CRITICAL)
+        if: steps.exists.outputs.found == 'true'
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ steps.tags.outputs.image_ref }}:${{ github.sha }}
+          format: table
+          severity: CRITICAL
+          exit-code: "1"
+          ignore-unfixed: true
+
+  # ---------------------------------------------------------------------
+  ci-summary:
+    name: CI summary
+    if: always()
+    runs-on: ubuntu-latest
+    needs:
+      - lint
+      - unit-tests
+      - sql-validation
+      - dbt-checks
+      - integration-tests
+      - connector-config-validation
+      - compose-validation
+      - build-images
+    steps:
+      - name: Write job summary and gate on required jobs
+        run: |
+          {
+            echo "## CI summary for \`${{ github.sha }}\`"
+            echo
+            echo "| Job | Result |"
+            echo "|---|---|"
+            echo "| lint | ${{ needs.lint.result }} |"
+            echo "| unit-tests | ${{ needs.unit-tests.result }} |"
+            echo "| sql-validation | ${{ needs.sql-validation.result }} |"
+            echo "| dbt-checks | ${{ needs.dbt-checks.result }} |"
+            echo "| integration-tests | ${{ needs.integration-tests.result }} |"
+            echo "| connector-config-validation | ${{ needs.connector-config-validation.result }} |"
+            echo "| compose-validation | ${{ needs.compose-validation.result }} |"
+            echo "| build-images | ${{ needs.build-images.result }} |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          required=(
+            "${{ needs.lint.result }}"
+            "${{ needs.unit-tests.result }}"
+            "${{ needs.sql-validation.result }}"
+            "${{ needs.dbt-checks.result }}"
+            "${{ needs.connector-config-validation.result }}"
+            "${{ needs.compose-validation.result }}"
+            "${{ needs.build-images.result }}"
+          )
+          # integration-tests is intentionally excluded here: it is
+          # conditionally skipped (see its own `if:`) on branches other
+          # than main/PRs, and "skipped" must not fail the summary.
+          for result in "${required[@]}"; do
+            if [ "$result" != "success" ]; then
+              echo "::error::one or more required jobs did not succeed"
+              exit 1
+            fi
+          done
+          if [ "${{ needs.integration-tests.result }}" != "success" ] && \
+             [ "${{ needs.integration-tests.result }}" != "skipped" ]; then
+            echo "::error::integration-tests failed"
+            exit 1
+          fi
+          echo "All required jobs passed."

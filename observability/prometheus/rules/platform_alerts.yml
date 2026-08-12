@@ -1,0 +1,120 @@
+# =====================================================================
+# platform_alerts.yml
+#
+# Alerts on the infrastructure the pipeline runs on: is each component
+# up, is ClickHouse's merge machinery keeping pace, is a Kafka consumer
+# falling behind, is a disk about to fill. Component-down alerts fire
+# fast (short `for:`) because a dead target produces no other signal at
+# all - every pipeline alert above depends on these being healthy.
+# =====================================================================
+groups:
+  - name: fineract_platform_alerts
+    rules:
+      - alert: PostgresDown
+        expr: up{job="postgres-exporter"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "postgres-exporter target is down"
+          description: >
+            Prometheus cannot scrape postgres-exporter. Either the OLTP
+            Postgres instance is down, or the exporter container has
+            crashed - either way, ingestion, CDC and the control plane
+            are all blind or blocked.
+          runbook: >
+            `docker compose ps postgres postgres-exporter`; check
+            postgres container logs for a crash loop before assuming the
+            exporter itself is at fault.
+
+      - alert: ClickHouseDown
+        expr: up{job="clickhouse"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "ClickHouse's native Prometheus endpoint is unreachable"
+          description: >
+            Prometheus cannot scrape ClickHouse on :9363. Kafka Engine
+            tables will keep buffering in Kafka (7-day retention) but no
+            queries against fineract_raw/staging/marts will succeed while
+            this is down.
+          runbook: >
+            `docker compose logs clickhouse --tail 200`; confirm the
+            server process is up with `docker compose exec clickhouse
+            clickhouse-client -q "SELECT 1"` before escalating.
+
+      - alert: KafkaConnectDown
+        expr: up{job="kafka-connect"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Kafka Connect (Debezium) is unreachable"
+          description: >
+            Prometheus cannot scrape the Kafka Connect JMX exporter.
+            Debezium is not producing CDC events, and the replication
+            slot will start accumulating WAL immediately - this typically
+            precedes CDCSlotLagHigh.
+          runbook: >
+            `make cdc-status`; if the container itself is down, restart
+            it and then `make cdc-register` to re-apply the connector
+            config (registration is idempotent).
+
+      - alert: ClickHousePartsExplosion
+        expr: fineract_clickhouse_active_parts > 300
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $labels.table }} has {{ $value | humanize }} active parts"
+          description: >
+            {{ $labels.database }}.{{ $labels.table }} has accumulated
+            more than 300 active parts. ReplacingMergeTree only collapses
+            duplicate row versions on merge, so queries are increasingly
+            reading (and paying to filter) stale versions.
+          runbook: >
+            Check whether background merges are running at all -
+            `SELECT * FROM system.merges WHERE table = '{{ $labels.table
+            }}'` - and whether insert batch size upstream has dropped
+            (many small inserts is the usual cause of part explosion).
+            `OPTIMIZE TABLE ... FINAL` is a manual escape hatch, not a fix.
+
+      - alert: KafkaConsumerLag
+        expr: sum by (consumergroup, topic) (kafka_consumergroup_lag) > 100000
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Kafka consumer group {{ $labels.consumergroup }} lagging on {{ $labels.topic }}"
+          description: >
+            Consumer group {{ $labels.consumergroup }} is more than
+            100,000 messages behind on {{ $labels.topic }}. For the
+            ClickHouse Kafka Engine consumer this means CDCFreshnessBreached
+            is likely next.
+          runbook: >
+            Check the ClickHouse Kafka Engine consumer via
+            fineract_ops.v_kafka_consumers (num_rebalance_revocations
+            climbing indicates the consumer is being kicked from the
+            group, not just slow); restart the affected materialized
+            view's consumer if it is stuck rather than merely behind.
+
+      - alert: DiskPressure
+        expr: >
+          node_filesystem_avail_bytes{fstype!~"tmpfs|overlay"} /
+          node_filesystem_size_bytes{fstype!~"tmpfs|overlay"} < 0.10
+        for: 10m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Less than 10% disk free on {{ $labels.instance }} ({{ $labels.mountpoint }})"
+          description: >
+            {{ $labels.mountpoint }} on {{ $labels.instance }} has less
+            than 10% free space. ClickHouse merges, Postgres WAL and
+            Kafka log segments all fail ungracefully when the disk fills,
+            so this must be treated as urgent even before it hits zero.
+          runbook: >
+            Identify the largest consumer first - `du -sh
+            /var/lib/{clickhouse,postgresql,kafka}/*` on the host - rather
+            than blindly deleting data; a full replication slot (see
+            CDCSlotLagHigh) is a common root cause of Postgres WAL growth.

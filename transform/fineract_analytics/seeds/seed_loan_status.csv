@@ -1,0 +1,11 @@
+status_id,status_code,status_label,status_group,is_terminal
+100,loanStatusType.submitted.and.pending.approval,Submitted and pending approval,Pipeline,0
+200,loanStatusType.approved,Approved,Pipeline,0
+300,loanStatusType.active,Active,Book,0
+303,loanStatusType.transfer.in.progress,Transfer in progress,Book,0
+400,loanStatusType.withdrawn.by.client,Withdrawn by client,Terminated,1
+500,loanStatusType.rejected,Rejected,Terminated,1
+600,loanStatusType.closed.obligations.met,Closed (obligations met),Terminated,1
+601,loanStatusType.closed.written.off,Closed (written off),Terminated,1
+602,loanStatusType.closed.rescheduled,Closed (rescheduled),Terminated,1
+700,loanStatusType.overpaid,Overpaid,Terminated,1

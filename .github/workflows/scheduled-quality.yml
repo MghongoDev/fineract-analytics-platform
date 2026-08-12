@@ -1,0 +1,182 @@
+name: Scheduled quality checks
+
+# Runs after the business day has fully landed in every timezone the
+# platform is used from, so a real freshness or reconciliation problem is
+# caught before the next morning's reporting rather than discovered by an
+# analyst looking at a stale dashboard.
+on:
+  schedule:
+    - cron: "0 3 * * *"
+  workflow_dispatch: {}
+
+concurrency:
+  group: scheduled-quality
+  cancel-in-progress: false
+
+env:
+  PYTHON_VERSION: "3.11"
+  ISSUE_LABEL: data-quality-alert
+
+jobs:
+  quality-checks:
+    name: Source freshness & reconciliation (production)
+    runs-on: ubuntu-latest
+    outputs:
+      status: ${{ steps.gate.outputs.status }}
+      details: ${{ steps.gate.outputs.details }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install dbt-core and dbt-clickhouse
+        run: pip install dbt-core dbt-clickhouse
+
+      - name: dbt deps
+        working-directory: transform/fineract_analytics
+        run: dbt deps
+
+      - name: dbt source freshness (production)
+        id: freshness
+        working-directory: transform/fineract_analytics
+        env:
+          DBT_TARGET: prod
+          CLICKHOUSE_HOST: ${{ secrets.CLICKHOUSE_HOST }}
+          CLICKHOUSE_HTTP_PORT: ${{ secrets.CLICKHOUSE_HTTP_PORT }}
+          CLICKHOUSE_USER: ${{ secrets.CLICKHOUSE_USER }}
+          CLICKHOUSE_PASSWORD: ${{ secrets.CLICKHOUSE_PASSWORD }}
+          CLICKHOUSE_DATABASE: ${{ secrets.CLICKHOUSE_DATABASE }}
+        run: dbt source freshness || echo "freshness_failed=true" >> "$GITHUB_OUTPUT"
+
+      - name: Reconciliation check (production)
+        id: reconciliation
+        env:
+          POSTGRES_HOST: ${{ secrets.PROD_POSTGRES_HOST }}
+          POSTGRES_PORT: ${{ secrets.PROD_POSTGRES_PORT }}
+          POSTGRES_DB: ${{ secrets.PROD_POSTGRES_DB }}
+          POSTGRES_USER: ${{ secrets.PROD_POSTGRES_USER }}
+          POSTGRES_PASSWORD: ${{ secrets.PROD_POSTGRES_PASSWORD }}
+        run: |
+          if [ -f scripts/reconcile.py ]; then
+            python scripts/reconcile.py --target prod || echo "reconciliation_failed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::scripts/reconcile.py not present yet; skipping reconciliation check"
+          fi
+
+      - name: Gate on results
+        id: gate
+        run: |
+          status="pass"
+          details=""
+          if [ "${{ steps.freshness.outputs.freshness_failed }}" = "true" ]; then
+            status="fail"
+            details="${details}- dbt source freshness failed (see 'dbt source freshness' step above)\n"
+          fi
+          if [ "${{ steps.reconciliation.outputs.reconciliation_failed }}" = "true" ]; then
+            status="fail"
+            details="${details}- reconciliation check failed (see 'Reconciliation check' step above)\n"
+          fi
+          echo "status=${status}" >> "$GITHUB_OUTPUT"
+          {
+            echo "details<<EOF"
+            echo -e "$details"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+          [ "$status" = "pass" ] || exit 1
+
+  file-or-update-issue:
+    name: Open/update GitHub issue on failure
+    needs: quality-checks
+    if: always() && needs.quality-checks.result == 'failure'
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+    steps:
+      - name: Open or update the standing data-quality issue
+        uses: actions/github-script@v7
+        env:
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          DETAILS: ${{ needs.quality-checks.outputs.details }}
+        with:
+          script: |
+            const label = process.env.ISSUE_LABEL || 'data-quality-alert';
+            const runUrl = process.env.RUN_URL;
+            const details = process.env.DETAILS || '(no details captured)';
+            const today = new Date().toISOString().slice(0, 10);
+
+            const title = 'Nightly data quality check failing';
+            const body = [
+              `**Latest failing run:** ${runUrl} (${today})`,
+              '',
+              '**Failures:**',
+              details,
+              '',
+              '_This issue is opened/updated automatically by `.github/workflows/scheduled-quality.yml`._',
+              '_It is auto-closed the next time the nightly run passes._',
+            ].join('\n');
+
+            const { data: existing } = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              labels: label,
+            });
+
+            if (existing.length > 0) {
+              const issue = existing[0];
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issue.number,
+                body: `Still failing as of ${today}.\n\n${details}\n\nRun: ${runUrl}`,
+              });
+              console.log(`Updated existing issue #${issue.number}`);
+            } else {
+              const created = await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title,
+                body,
+                labels: [label],
+              });
+              console.log(`Opened new issue #${created.data.number}`);
+            }
+
+  close-issue-on-recovery:
+    name: Close standing issue when the check recovers
+    needs: quality-checks
+    if: always() && needs.quality-checks.result == 'success'
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+    steps:
+      - name: Close the standing data-quality issue if one is open
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const label = process.env.ISSUE_LABEL || 'data-quality-alert';
+            const { data: existing } = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              labels: label,
+            });
+            for (const issue of existing) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issue.number,
+                body: 'Nightly quality checks are passing again. Closing.',
+              });
+              await github.rest.issues.update({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issue.number,
+                state: 'closed',
+              });
+              console.log(`Closed issue #${issue.number}`);
+            }

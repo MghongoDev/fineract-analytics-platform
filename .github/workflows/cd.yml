@@ -1,0 +1,255 @@
+name: CD
+
+# Deploys happen from an annotated release tag, or by hand for a
+# controlled re-deploy / rollback of an already-built version. Nothing
+# here builds from a floating branch ref - every deploy is traceable to
+# an exact tag and an exact CI run.
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Target environment
+        type: choice
+        required: true
+        options:
+          - staging
+          - production
+      ref:
+        description: Git ref to deploy (tag or SHA). Defaults to the current ref.
+        required: false
+        default: ""
+
+concurrency:
+  group: cd-${{ github.event.inputs.environment || 'tag' }}
+  cancel-in-progress: false
+
+env:
+  PYTHON_VERSION: "3.11"
+
+jobs:
+  # ---------------------------------------------------------------------
+  verify-ci:
+    name: Verify CI passed for this SHA
+    runs-on: ubuntu-latest
+    outputs:
+      sha: ${{ steps.resolve.outputs.sha }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.ref || github.ref }}
+          fetch-depth: 0
+
+      - name: Resolve target SHA
+        id: resolve
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      # A tag is a promise that main was green when it was cut - but the
+      # only way to know that for certain is to ask the API, not to
+      # assume. Deploying an unvetted SHA is exactly how a broken build
+      # reaches production.
+      - name: Require a successful CI run for this SHA
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          sha="${{ steps.resolve.outputs.sha }}"
+          echo "checking CI status for ${sha}"
+          conclusion=$(gh api "repos/${{ github.repository }}/commits/${sha}/check-runs" \
+            --jq '[.check_runs[] | select(.name == "ci-summary")][0].conclusion // "missing"')
+          echo "ci-summary conclusion: ${conclusion}"
+          if [ "$conclusion" != "success" ]; then
+            echo "::error::CI has not passed (or has not run) for ${sha}; refusing to deploy"
+            exit 1
+          fi
+
+  # ---------------------------------------------------------------------
+  build-versioned-images:
+    name: Build & push versioned image (${{ matrix.image }})
+    runs-on: ubuntu-latest
+    needs: verify-ci
+    strategy:
+      matrix:
+        include:
+          - image: ingestion
+            context: ingestion
+            dockerfile: ingestion/Dockerfile
+          - image: orchestration-airflow
+            context: orchestration
+            dockerfile: orchestration/Dockerfile
+          - image: observability-exporter
+            context: observability/exporter
+            dockerfile: observability/exporter/Dockerfile
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.verify-ci.outputs.sha }}
+
+      - name: Check whether ${{ matrix.dockerfile }} exists yet
+        id: exists
+        run: |
+          if [ -f "${{ matrix.dockerfile }}" ]; then
+            echo "found=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::${{ matrix.dockerfile }} not present yet, skipping"
+            echo "found=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Set up Docker Buildx
+        if: steps.exists.outputs.found == 'true'
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to ghcr.io
+        if: steps.exists.outputs.found == 'true'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Derive version tag
+        id: version
+        run: |
+          version="${{ github.ref_name }}"
+          [ -n "${{ github.event.inputs.ref }}" ] && version="${{ needs.verify-ci.outputs.sha }}"
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+
+      - name: Build and push ${{ matrix.image }}:${{ steps.version.outputs.version }}
+        if: steps.exists.outputs.found == 'true'
+        uses: docker/build-push-action@v5
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.dockerfile }}
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository }}/${{ matrix.image }}:${{ steps.version.outputs.version }}
+            ghcr.io/${{ github.repository }}/${{ matrix.image }}:${{ needs.verify-ci.outputs.sha }}
+          cache-from: type=gha,scope=${{ matrix.image }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.image }}
+
+  # ---------------------------------------------------------------------
+  deploy:
+    name: Deploy dbt (${{ github.event.inputs.environment || 'staging' }})
+    runs-on: ubuntu-latest
+    needs: [verify-ci, build-versioned-images]
+    # GitHub Environments gate `production` behind required reviewers,
+    # configured on the repo (Settings -> Environments -> production).
+    # `staging` has no required reviewers, so a tag push can reach it
+    # unattended; production always needs a human to click approve.
+    environment: ${{ github.event.inputs.environment || 'staging' }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.verify-ci.outputs.sha }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install dbt-core and dbt-clickhouse
+        run: pip install dbt-core dbt-clickhouse
+
+      # Slim CI pattern: rather than rebuilding the entire warehouse on
+      # every deploy, `state:modified+` selects only nodes that changed
+      # (plus their downstream) relative to the manifest of what is
+      # already live in prod, and `--defer` lets unselected nodes resolve
+      # ref()/source() against that live state instead of needing to be
+      # rebuilt locally first. This keeps a routine deploy fast and
+      # bounded to the blast radius of the actual change, while
+      # `--fail-fast` stops immediately on the first broken model instead
+      # of continuing to build downstream of a known-bad node.
+      - name: Fetch previous production manifest (state for slim CI)
+        env:
+          CLICKHOUSE_HOST: ${{ secrets.CLICKHOUSE_HOST }}
+        run: |
+          mkdir -p ./prod-manifest
+          if [ -f transform/fineract_analytics/target/manifest.json ]; then
+            cp transform/fineract_analytics/target/manifest.json ./prod-manifest/manifest.json
+          else
+            echo "::warning::no previous production manifest found; slim selection will build the full DAG this run"
+          fi
+
+      - name: dbt deps
+        working-directory: transform/fineract_analytics
+        run: dbt deps
+
+      - name: dbt build --target prod (state:modified+, deferred, fail-fast)
+        working-directory: transform/fineract_analytics
+        env:
+          DBT_TARGET: prod
+          CLICKHOUSE_HOST: ${{ secrets.CLICKHOUSE_HOST }}
+          CLICKHOUSE_HTTP_PORT: ${{ secrets.CLICKHOUSE_HTTP_PORT }}
+          CLICKHOUSE_USER: ${{ secrets.CLICKHOUSE_USER }}
+          CLICKHOUSE_PASSWORD: ${{ secrets.CLICKHOUSE_PASSWORD }}
+          CLICKHOUSE_DATABASE: ${{ secrets.CLICKHOUSE_DATABASE }}
+          CLICKHOUSE_CLUSTER: ${{ secrets.CLICKHOUSE_CLUSTER }}
+        run: |
+          dbt build \
+            --target prod \
+            --fail-fast \
+            --select "state:modified+" \
+            --defer --state ../../prod-manifest
+
+      - name: Upload new manifest as the next deploy's state baseline
+        uses: actions/upload-artifact@v4
+        with:
+          name: prod-manifest-${{ needs.verify-ci.outputs.sha }}
+          path: transform/fineract_analytics/target/manifest.json
+
+  # ---------------------------------------------------------------------
+  smoke-check:
+    name: Post-deploy smoke check
+    runs-on: ubuntu-latest
+    needs: [verify-ci, deploy]
+    environment: ${{ github.event.inputs.environment || 'staging' }}
+    steps:
+      - name: Hit pipeline exporter /metrics and assert freshness
+        env:
+          EXPORTER_URL: ${{ secrets.PIPELINE_EXPORTER_URL }}
+        run: |
+          if [ -z "${EXPORTER_URL}" ]; then
+            echo "::error::PIPELINE_EXPORTER_URL secret is not set; cannot smoke test"
+            exit 1
+          fi
+          metrics=$(curl -fsS --max-time 15 "${EXPORTER_URL%/}/metrics")
+          echo "${metrics}" | grep -E '^fineract_(cdc|ingestion)_lag_seconds' || {
+            echo "::error::freshness metric not found in exporter output"
+            exit 1
+          }
+          max_lag_seconds=3600
+          stale=$(echo "${metrics}" \
+            | awk -v max="${max_lag_seconds}" '/^fineract_(cdc|ingestion)_lag_seconds/ && $NF+0 > max {print}')
+          if [ -n "${stale}" ]; then
+            echo "::error::pipeline is stale beyond ${max_lag_seconds}s after deploy:"
+            echo "${stale}"
+            exit 1
+          fi
+          echo "smoke check OK: pipeline is fresh after deploy"
+
+  # ---------------------------------------------------------------------
+  rollback-note:
+    name: Emit rollback note on failure
+    if: failure()
+    needs: [verify-ci, build-versioned-images, deploy, smoke-check]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Write rollback guidance to the run summary
+        run: |
+          {
+            echo "## Deploy failed - rollback guidance"
+            echo
+            echo "Target: \`${{ github.event.inputs.environment || 'staging' }}\`"
+            echo "Attempted SHA: \`${{ needs.verify-ci.outputs.sha }}\`"
+            echo
+            echo "1. Re-run this workflow via workflow_dispatch pinned to the last known-good tag."
+            echo "2. If dbt models were partially built, re-run \`dbt build --target prod --select state:modified+ --defer --state ./prod-manifest\`"
+            echo "   from the last-known-good manifest artifact (\`prod-manifest-<sha>\`) to converge the warehouse."
+            echo "3. Image tags are immutable and additive - the previous version's image is still in ghcr.io and can be"
+            echo "   redeployed directly without a rebuild."
+            echo "4. Check the smoke-check job output above for which freshness metric failed before re-attempting."
+          } >> "$GITHUB_STEP_SUMMARY"

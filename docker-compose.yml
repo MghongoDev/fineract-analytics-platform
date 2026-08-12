@@ -1,0 +1,595 @@
+# =====================================================================
+# Fineract analytics platform - the whole stack, one command.
+#
+#   make up          everything
+#   make up-core     platform only (no Fineract, no observability)
+#   docker compose --profile mock up -d    offline source, no internet
+#
+# PROFILES
+# --------
+#   (default)  postgres, kafka, connect, clickhouse, airflow, exporters
+#   fineract   a self-hosted Apache Fineract + its own database
+#   mock       a deterministic offline stand-in for the Fineract API
+#   tools      kafka-ui and an interactive dbt shell
+#
+# The source of data is chosen by profile, not by editing files:
+#   * `--profile fineract` runs a real Fineract locally
+#   * `--profile mock` runs the recorded-fixture server (no network)
+#   * neither profile + FINERACT_BASE_URL=https://demo.mifos.io/...
+#     points at the public Apache demo instance
+#
+# WHY FINERACT HAS ITS OWN DATABASE
+# ---------------------------------
+# `fineract-db` is separate from `postgres` on purpose. We ingest from
+# Fineract's REST API, not by tapping its internal schema - the API is
+# the supported contract, the schema is not. Keeping the databases apart
+# makes that boundary impossible to blur, and means the CDC publication
+# only ever contains our own landing tables.
+# =====================================================================
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "20m"
+    max-file: "3"
+
+x-airflow-common: &airflow-common
+  build:
+    context: .
+    dockerfile: orchestration/Dockerfile
+  image: fineract-analytics/airflow:latest
+  env_file: .env
+  environment: &airflow-env
+    AIRFLOW__CORE__EXECUTOR: LocalExecutor
+    AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@airflow-db:5432/airflow
+    AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+    AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "false"
+    AIRFLOW__CORE__PARALLELISM: "16"
+    AIRFLOW__CORE__MAX_ACTIVE_TASKS_PER_DAG: "8"
+    AIRFLOW__SCHEDULER__MIN_FILE_PROCESS_INTERVAL: "30"
+    AIRFLOW__WEBSERVER__EXPOSE_CONFIG: "true"
+    AIRFLOW__API__AUTH_BACKENDS: airflow.api.auth.backend.basic_auth,airflow.api.auth.backend.session
+    # Airflow speaks StatsD, not Prometheus. statsd-exporter translates.
+    AIRFLOW__METRICS__STATSD_ON: "true"
+    AIRFLOW__METRICS__STATSD_HOST: statsd-exporter
+    AIRFLOW__METRICS__STATSD_PORT: "9125"
+    AIRFLOW__METRICS__STATSD_PREFIX: airflow
+    PYTHONPATH: /opt/airflow/plugins:/opt/airflow/dags
+    DBT_PROJECT_DIR: /opt/airflow/dbt
+    DBT_PROFILES_DIR: /opt/airflow/dbt
+  volumes:
+    - ./orchestration/dags:/opt/airflow/dags:ro
+    - ./orchestration/plugins:/opt/airflow/plugins:ro
+    - ./transform/fineract_analytics:/opt/airflow/dbt
+    - airflow-logs:/opt/airflow/logs
+  logging: *default-logging
+  networks: [fineract-net]
+
+services:
+
+  # ===================================================================
+  # SOURCE SYSTEM (profile: fineract)
+  # ===================================================================
+  fineract-db:
+    image: postgres:16-alpine
+    profiles: [fineract]
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${FINERACT_DB_PASSWORD:-skdcnwauicn2ucnaecasdsajdnizucawencascdca}
+      POSTGRES_DB: fineract_tenants
+    volumes:
+      - fineract-db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    logging: *default-logging
+    networks: [fineract-net]
+
+  fineract:
+    image: apache/fineract:latest
+    profiles: [fineract]
+    depends_on:
+      fineract-db:
+        condition: service_healthy
+    environment:
+      FINERACT_HIKARI_DRIVER_SOURCE_CLASS_NAME: org.postgresql.Driver
+      FINERACT_HIKARI_JDBC_URL: jdbc:postgresql://fineract-db:5432/fineract_tenants
+      FINERACT_HIKARI_USERNAME: postgres
+      FINERACT_HIKARI_PASSWORD: ${FINERACT_DB_PASSWORD:-skdcnwauicn2ucnaecasdsajdnizucawencascdca}
+      FINERACT_DEFAULT_TENANTDB_HOSTNAME: fineract-db
+      FINERACT_DEFAULT_TENANTDB_PORT: "5432"
+      FINERACT_DEFAULT_TENANTDB_UID: postgres
+      FINERACT_DEFAULT_TENANTDB_PWD: ${FINERACT_DB_PASSWORD:-skdcnwauicn2ucnaecasdsajdnizucawencascdca}
+      FINERACT_DEFAULT_TENANTDB_NAME: fineract_default
+      FINERACT_DEFAULT_TENANTDB_IDENTIFIER: default
+      FINERACT_DEFAULT_TENANTDB_TIMEZONE: Africa/Nairobi
+      FINERACT_SERVER_SSL_ENABLED: "true"
+      # Expose Spring Boot actuator metrics so Prometheus can scrape the
+      # source system too - source latency is a pipeline concern.
+      FINERACT_MANAGEMENT_ENDPOINT_WEB_EXPOSURE_INCLUDE: health,info,prometheus
+      JAVA_TOOL_OPTIONS: "-Xmx1G -XX:MaxRAMPercentage=75"
+    ports:
+      - "${FINERACT_PORT:-8443}:8443"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsk https://localhost:8443/fineract-provider/actuator/health || exit 1"]
+      interval: 20s
+      timeout: 10s
+      retries: 30
+      start_period: 180s
+    logging: *default-logging
+    networks: [fineract-net]
+
+  # Offline stand-in for the Fineract API (profile: mock).
+  # Same resource shapes, seeded generator, no network required.
+  fineract-mock:
+    build:
+      context: ./ingestion
+      dockerfile: Dockerfile
+    image: fineract-analytics/ingestion:latest
+    profiles: [mock]
+    entrypoint: ["python", "-m", "fineract_ingest.mock_server"]
+    command: ["--port", "8090", "--clients", "500", "--loans", "900"]
+    ports:
+      - "${FINERACT_MOCK_PORT:-8090}:8090"
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request;urllib.request.urlopen('http://localhost:8090/fineract-provider/api/v1/actuator/health')\""]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    logging: *default-logging
+    networks: [fineract-net]
+
+  # ===================================================================
+  # OLTP LANDING DATABASE
+  # ===================================================================
+  postgres:
+    image: postgres:16-alpine
+    # The custom config is what enables logical replication. Without
+    # wal_level=logical the Debezium connector fails on startup with an
+    # error that does not mention wal_level at all.
+    command:
+      - postgres
+      - -c
+      - config_file=/etc/postgresql/postgresql.conf
+      - -c
+      - hba_file=/etc/postgresql/pg_hba.conf
+    environment:
+      POSTGRES_USER: ${POSTGRES_SUPERUSER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_SUPERUSER_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-fineract_oltp}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./platform/postgres/conf/postgresql.conf:/etc/postgresql/postgresql.conf:ro
+      - ./platform/postgres/conf/pg_hba.conf:/etc/postgresql/pg_hba.conf:ro
+      # Files here run once, in lexical order, on first boot.
+      - ./platform/postgres/init:/docker-entrypoint-initdb.d:ro
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_SUPERUSER:-postgres} -d ${POSTGRES_DB:-fineract_oltp}"]
+      interval: 10s
+      timeout: 5s
+      retries: 15
+      start_period: 20s
+    logging: *default-logging
+    networks: [fineract-net]
+
+  # ===================================================================
+  # STREAMING
+  # ===================================================================
+  kafka:
+    image: confluentinc/cp-kafka:7.6.1
+    # KRaft mode: no ZooKeeper. One less stateful service to run, and
+    # ZooKeeper is removed in current Kafka anyway.
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:29093
+      KAFKA_LISTENERS: PLAINTEXT://kafka:29092,CONTROLLER://kafka:29093,EXTERNAL://0.0.0.0:9092
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,EXTERNAL://localhost:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,EXTERNAL:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      # 7 days of retention: long enough that ClickHouse can be down for
+      # a long weekend without losing a single change event.
+      KAFKA_LOG_RETENTION_HOURS: 168
+      KAFKA_LOG_SEGMENT_BYTES: 268435456
+      KAFKA_COMPRESSION_TYPE: lz4
+      KAFKA_NUM_PARTITIONS: 3
+      CLUSTER_ID: ${KAFKA_CLUSTER_ID:-MkU3OEVBNTcwNTJENDM2Qk}
+      KAFKA_HEAP_OPTS: "-Xmx1G -Xms512M"
+    ports:
+      - "${KAFKA_PORT:-9092}:9092"
+    volumes:
+      - kafka-data:/var/lib/kafka/data
+    healthcheck:
+      test: ["CMD-SHELL", "kafka-broker-api-versions --bootstrap-server localhost:29092 >/dev/null 2>&1 || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 20
+      start_period: 45s
+    logging: *default-logging
+    networks: [fineract-net]
+
+  kafka-connect:
+    image: debezium/connect:2.7.3.Final
+    depends_on:
+      kafka:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    environment:
+      BOOTSTRAP_SERVERS: kafka:29092
+      GROUP_ID: fineract-connect
+      CONFIG_STORAGE_TOPIC: connect-configs
+      OFFSET_STORAGE_TOPIC: connect-offsets
+      STATUS_STORAGE_TOPIC: connect-status
+      CONFIG_STORAGE_REPLICATION_FACTOR: 1
+      OFFSET_STORAGE_REPLICATION_FACTOR: 1
+      STATUS_STORAGE_REPLICATION_FACTOR: 1
+      KEY_CONVERTER: org.apache.kafka.connect.json.JsonConverter
+      VALUE_CONVERTER: org.apache.kafka.connect.json.JsonConverter
+      CONNECT_KEY_CONVERTER_SCHEMAS_ENABLE: "false"
+      CONNECT_VALUE_CONVERTER_SCHEMAS_ENABLE: "false"
+      # The connector JSON references these with ${env:...}, so nothing
+      # sensitive is committed to git.
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
+      POSTGRES_DB: ${POSTGRES_DB:-fineract_oltp}
+      DEBEZIUM_USER: ${DEBEZIUM_USER:-debezium}
+      DEBEZIUM_PASSWORD: ${DEBEZIUM_PASSWORD:-debezium}
+      CONNECT_CONFIG_PROVIDERS: env
+      CONNECT_CONFIG_PROVIDERS_ENV_CLASS: org.apache.kafka.common.config.provider.EnvVarConfigProvider
+      # JMX -> Prometheus, so connector throughput and task state are
+      # visible next to everything else rather than only in Connect logs.
+      KAFKA_OPTS: "-javaagent:/kafka/jmx_prometheus_javaagent.jar=9404:/kafka/etc/jmx-exporter.yml"
+      JMXHOST: localhost
+      JMXPORT: 1976
+    ports:
+      - "${CONNECT_PORT:-8083}:8083"
+      - "9404:9404"
+    volumes:
+      - ./platform/kafka/jmx-exporter.yml:/kafka/etc/jmx-exporter.yml:ro
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8083/connectors || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 20
+      start_period: 60s
+    logging: *default-logging
+    networks: [fineract-net]
+
+  # One-shot job: registers the Debezium connector idempotently.
+  # Runs as part of `make up` so the CDC path is live without a manual
+  # curl, and re-running it reconciles the connector with what is in git.
+  cdc-register:
+    image: python:3.11-slim
+    depends_on:
+      kafka-connect:
+        condition: service_healthy
+    environment:
+      CONNECT_URL: http://kafka-connect:8083
+    volumes:
+      - ./cdc:/cdc:ro
+    entrypoint: ["/bin/bash", "-c"]
+    command:
+      - |
+        apt-get update -qq && apt-get install -y -qq curl >/dev/null
+        bash /cdc/scripts/register-connectors.sh
+    restart: "no"
+    logging: *default-logging
+    networks: [fineract-net]
+
+  kafka-ui:
+    image: provectuslabs/kafka-ui:latest
+    profiles: [tools]
+    depends_on:
+      kafka:
+        condition: service_healthy
+    environment:
+      KAFKA_CLUSTERS_0_NAME: fineract
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:29092
+      KAFKA_CLUSTERS_0_KAFKACONNECT_0_NAME: debezium
+      KAFKA_CLUSTERS_0_KAFKACONNECT_0_ADDRESS: http://kafka-connect:8083
+      DYNAMIC_CONFIG_ENABLED: "true"
+    ports:
+      - "${KAFKA_UI_PORT:-8091}:8080"
+    logging: *default-logging
+    networks: [fineract-net]
+
+  # ===================================================================
+  # ANALYTICAL DATABASE
+  # ===================================================================
+  clickhouse:
+    image: clickhouse/clickhouse-server:24.8-alpine
+    depends_on:
+      kafka:
+        condition: service_healthy
+    environment:
+      CLICKHOUSE_DB: default
+      CLICKHOUSE_USER: ${CLICKHOUSE_USER:-analytics}
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-analytics}
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: "1"
+    volumes:
+      - clickhouse-data:/var/lib/clickhouse
+      - ./platform/clickhouse/config:/etc/clickhouse-server/config.d:ro
+      - ./platform/clickhouse/users:/etc/clickhouse-server/users.d:ro
+      # Runs once on first boot, in lexical order. Order matters: the
+      # Kafka engine tables must exist before the MVs that read them.
+      - ./platform/clickhouse/init:/docker-entrypoint-initdb.d:ro
+    ports:
+      - "${CLICKHOUSE_HTTP_PORT:-8123}:8123"
+      - "${CLICKHOUSE_NATIVE_PORT:-9000}:9000"
+      - "9363:9363"    # native Prometheus endpoint
+    ulimits:
+      nofile: { soft: 262144, hard: 262144 }
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8123/ping | grep -q Ok"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
+    logging: *default-logging
+    networks: [fineract-net]
+
+  # ===================================================================
+  # INGESTION (manual / invoked by Airflow)
+  # ===================================================================
+  ingestion:
+    build:
+      context: ./ingestion
+      dockerfile: Dockerfile
+    image: fineract-analytics/ingestion:latest
+    env_file: .env
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      POSTGRES_HOST: postgres
+      PROMETHEUS_PUSHGATEWAY_URL: http://pushgateway:9091
+    # Does nothing until asked: `make ingest` or the Airflow DAG drives it.
+    command: ["--help"]
+    restart: "no"
+    logging: *default-logging
+    networks: [fineract-net]
+
+  # ===================================================================
+  # ORCHESTRATION
+  # ===================================================================
+  airflow-db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: airflow
+      POSTGRES_PASSWORD: airflow
+      POSTGRES_DB: airflow
+    volumes:
+      - airflow-db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U airflow"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    logging: *default-logging
+    networks: [fineract-net]
+
+  airflow-init:
+    <<: *airflow-common
+    depends_on:
+      airflow-db:
+        condition: service_healthy
+    entrypoint: ["/bin/bash", "-c"]
+    command:
+      - |
+        airflow db migrate
+        airflow users create \
+          --username "${AIRFLOW_ADMIN_USER:-admin}" \
+          --password "${AIRFLOW_ADMIN_PASSWORD:-admin}" \
+          --firstname Data --lastname Engineer \
+          --role Admin --email admin@example.org || true
+        echo "airflow initialised"
+    restart: "no"
+
+  airflow-scheduler:
+    <<: *airflow-common
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+      clickhouse:
+        condition: service_healthy
+    command: scheduler
+    healthcheck:
+      test: ["CMD-SHELL", "airflow jobs check --job-type SchedulerJob --hostname \"$${HOSTNAME}\""]
+      interval: 30s
+      timeout: 20s
+      retries: 5
+      start_period: 60s
+    restart: unless-stopped
+
+  airflow-webserver:
+    <<: *airflow-common
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
+    command: webserver
+    ports:
+      - "${AIRFLOW_PORT:-8085}:8080"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8080/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 10
+      start_period: 60s
+    restart: unless-stopped
+
+  # Interactive dbt shell for ad-hoc work: `make dbt-run`, `docker
+  # compose run --rm dbt run --select tag:marts`, etc.
+  dbt:
+    <<: *airflow-common
+    profiles: [tools]
+    depends_on:
+      clickhouse:
+        condition: service_healthy
+    entrypoint: ["dbt"]
+    command: ["--version"]
+    ports: []
+    restart: "no"
+
+  # ===================================================================
+  # OBSERVABILITY
+  # ===================================================================
+  prometheus:
+    image: prom/prometheus:v2.54.1
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=15d
+      - --web.enable-lifecycle
+    volumes:
+      - ./observability/prometheus:/etc/prometheus:ro
+      - prometheus-data:/prometheus
+    ports:
+      - "${PROMETHEUS_PORT:-9090}:9090"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:9090/-/healthy | grep -q Healthy"]
+      interval: 20s
+      timeout: 10s
+      retries: 10
+    logging: *default-logging
+    networks: [fineract-net]
+
+  grafana:
+    image: grafana/grafana:11.2.0
+    depends_on:
+      prometheus:
+        condition: service_healthy
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-admin}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_INSTALL_PLUGINS: grafana-clickhouse-datasource
+      GF_DASHBOARDS_MIN_REFRESH_INTERVAL: 5s
+    volumes:
+      - ./observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    ports:
+      - "${GRAFANA_PORT:-3000}:3000"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3000/api/health | grep -q ok"]
+      interval: 20s
+      timeout: 10s
+      retries: 10
+      start_period: 30s
+    logging: *default-logging
+    networks: [fineract-net]
+
+  # Batch jobs exit before Prometheus could scrape them, so they push.
+  pushgateway:
+    image: prom/pushgateway:v1.9.0
+    command:
+      - --persistence.file=/data/pushgateway.store
+      - --persistence.interval=5m
+    volumes:
+      - pushgateway-data:/data
+    ports:
+      - "${PUSHGATEWAY_PORT:-9091}:9091"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:9091/-/healthy >/dev/null || exit 1"]
+      interval: 20s
+      timeout: 10s
+      retries: 10
+    logging: *default-logging
+    networks: [fineract-net]
+
+  # Airflow emits StatsD; this translates it into Prometheus metrics.
+  statsd-exporter:
+    image: prom/statsd-exporter:v0.27.1
+    command:
+      - --statsd.mapping-config=/etc/statsd/statsd-mapping.yml
+      - --statsd.listen-udp=:9125
+      - --web.listen-address=:9102
+    volumes:
+      - ./observability/statsd:/etc/statsd:ro
+    ports:
+      - "9102:9102"
+    logging: *default-logging
+    networks: [fineract-net]
+
+  postgres-exporter:
+    image: prometheuscommunity/postgres-exporter:v0.15.0
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATA_SOURCE_NAME: "postgresql://${POSTGRES_SUPERUSER:-postgres}:${POSTGRES_SUPERUSER_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-fineract_oltp}?sslmode=disable"
+      PG_EXPORTER_AUTO_DISCOVER_DATABASES: "false"
+    ports:
+      - "9187:9187"
+    logging: *default-logging
+    networks: [fineract-net]
+
+  kafka-exporter:
+    image: danielqsj/kafka-exporter:v1.7.0
+    depends_on:
+      kafka:
+        condition: service_healthy
+    command: ["--kafka.server=kafka:29092"]
+    ports:
+      - "9308:9308"
+    logging: *default-logging
+    networks: [fineract-net]
+
+  # The custom exporter: everything Prometheus needs to know about the
+  # DATA rather than the processes - freshness, CDC lag, reconciliation.
+  pipeline-exporter:
+    build:
+      context: ./observability/exporter
+      dockerfile: Dockerfile
+    image: fineract-analytics/pipeline-exporter:latest
+    env_file: .env
+    depends_on:
+      postgres:
+        condition: service_healthy
+      clickhouse:
+        condition: service_healthy
+    environment:
+      POSTGRES_HOST: postgres
+      CLICKHOUSE_HOST: clickhouse
+      EXPORTER_PORT: "9105"
+      EXPORTER_SCRAPE_INTERVAL_SECONDS: "30"
+    ports:
+      - "${EXPORTER_PORT:-9105}:9105"
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request;urllib.request.urlopen('http://localhost:9105/metrics')\""]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 20s
+    restart: unless-stopped
+    logging: *default-logging
+    networks: [fineract-net]
+
+networks:
+  fineract-net:
+    driver: bridge
+    name: fineract-net
+
+volumes:
+  postgres-data:
+  fineract-db-data:
+  kafka-data:
+  clickhouse-data:
+  airflow-db-data:
+  airflow-logs:
+  prometheus-data:
+  grafana-data:
+  pushgateway-data:

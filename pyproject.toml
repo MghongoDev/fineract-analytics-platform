@@ -1,0 +1,74 @@
+# =====================================================================
+# Repo-wide tooling config - NOT an installable package.
+#
+# `ingestion/pyproject.toml` is the actual package (`fineract-ingest`,
+# with its own [project] table, dependencies and entry points). This
+# file only configures tools (ruff, pytest, coverage) that operate
+# across the whole repo - orchestration/ and tests/ have no package of
+# their own to hang config off, and running one linter/test config from
+# the root is simpler than one per directory.
+# =====================================================================
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+extend-exclude = [
+    "transform/fineract_analytics/target",
+    "transform/fineract_analytics/dbt_packages",
+    "**/__pycache__",
+]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "C4", "SIM"]
+ignore = [
+    "B008",   # function calls in default args - Airflow operators use this
+              # pattern throughout (e.g. default_args=..., timedelta(...)),
+              # and it is idiomatic there, not a latent mutable-default bug.
+    "SIM108", # "use ternary" - several conditionals in the ingestion
+              # validators are clearer as if/else than as a one-line ternary
+              # once the branches carry a comment explaining the rule.
+]
+
+[tool.ruff.lint.per-file-ignores]
+# DAG modules import Airflow operators/sensors that are only resolvable
+# inside the Airflow image (see orchestration/plugins/fineract), so a
+# lint-only environment cannot always statically confirm every import is
+# used, and DAG files intentionally do `sys.path.insert(...)` before
+# importing local plugins - both trip rules that are correct in general
+# and wrong for this specific file shape.
+"orchestration/dags/*.py" = ["E402"]   # module-level import not at top of file
+# Test files assert against private/internal APIs and use bare fixtures
+# named to shadow outer scope on purpose (pytest convention), which ruff
+# otherwise flags as unused-import or redefinition noise.
+"**/tests/*.py" = ["F401", "F811"]
+"tests/**/*.py" = ["F401", "F811"]
+
+[tool.pytest.ini_options]
+testpaths = ["ingestion/tests", "tests", "orchestration/tests"]
+addopts = "--strict-markers"
+markers = [
+    "integration: requires a running stack (Postgres/ClickHouse/Kafka); skipped unless the environment points at one",
+    "slow: takes more than a couple of seconds; excluded from the fast default run",
+]
+
+[tool.coverage.run]
+branch = true
+source = ["ingestion/fineract_ingest", "orchestration", "scripts"]
+omit = [
+    "*/tests/*",
+    "*/__pycache__/*",
+    "*/migrations/*",
+]
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = false
+precision = 1
+exclude_lines = [
+    "pragma: no cover",
+    "raise NotImplementedError",
+    "if __name__ == .__main__.:",
+    "if TYPE_CHECKING:",
+    "\\.\\.\\.",
+    "@(abc\\.)?abstractmethod",
+]

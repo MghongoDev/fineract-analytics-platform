@@ -1,0 +1,87 @@
+version: 2
+
+updates:
+  # ---------------------------------------------------------------------
+  # Python: ingestion service
+  # ---------------------------------------------------------------------
+  - package-ecosystem: pip
+    directory: /ingestion
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 10
+    labels: [dependencies, python, ingestion]
+    commit-message:
+      prefix: "chore(ingestion)"
+
+  # ---------------------------------------------------------------------
+  # Python: orchestration (Airflow DAGs / plugins)
+  # ---------------------------------------------------------------------
+  - package-ecosystem: pip
+    directory: /orchestration
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 10
+    labels: [dependencies, python, orchestration]
+    commit-message:
+      prefix: "chore(orchestration)"
+
+  # ---------------------------------------------------------------------
+  # Python: observability exporter
+  # ---------------------------------------------------------------------
+  - package-ecosystem: pip
+    directory: /observability/exporter
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 10
+    labels: [dependencies, python, observability]
+    commit-message:
+      prefix: "chore(observability)"
+
+  # ---------------------------------------------------------------------
+  # GitHub Actions used across all workflows
+  # ---------------------------------------------------------------------
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 10
+    labels: [dependencies, github-actions]
+    commit-message:
+      prefix: "chore(ci)"
+
+  # ---------------------------------------------------------------------
+  # Docker base images
+  # ---------------------------------------------------------------------
+  - package-ecosystem: docker
+    directory: /ingestion
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    labels: [dependencies, docker, ingestion]
+    commit-message:
+      prefix: "chore(docker)"
+
+  - package-ecosystem: docker
+    directory: /orchestration
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    labels: [dependencies, docker, orchestration]
+    commit-message:
+      prefix: "chore(docker)"
+
+  - package-ecosystem: docker
+    directory: /observability/exporter
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    labels: [dependencies, docker, observability]
+    commit-message:
+      prefix: "chore(docker)"

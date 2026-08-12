@@ -1,0 +1,115 @@
+# =====================================================================
+# statsd-mapping.yml
+#
+# Airflow emits metrics over StatsD (dot-delimited names, no labels),
+# not Prometheus - it has no built-in exporter of its own. This file
+# configures the Prometheus statsd_exporter as a translation layer: it
+# listens for the StatsD UDP packets Airflow already sends
+# (AIRFLOW__METRICS__STATSD_ON=True) and re-exposes them as labelled
+# Prometheus series on :9102/metrics, which is the target
+# `airflow-statsd` in prometheus.yml scrapes.
+#
+# Rule order matters: statsd_exporter uses the first matching rule, so
+# more specific glob patterns are listed before their broader fallbacks.
+# =====================================================================
+
+defaults:
+  timer_type: histogram
+  buckets: [0.1, 0.5, 1, 2.5, 5, 10, 30, 60, 120, 300, 600]
+
+mappings:
+  # airflow.dag.<dag_id>.<task_id>.duration - per-task wall-clock time.
+  - match: "airflow.dag.*.*.duration"
+    name: "airflow_dag_task_duration_seconds"
+    timer_type: histogram
+    labels:
+      dag_id: "$1"
+      task_id: "$2"
+
+  # airflow.dagrun.duration.success.<dag_id> / .failed.<dag_id>
+  - match: "airflow.dagrun.duration.success.*"
+    name: "airflow_dagrun_duration_seconds"
+    timer_type: histogram
+    labels:
+      dag_id: "$1"
+      status: "success"
+
+  - match: "airflow.dagrun.duration.failed.*"
+    name: "airflow_dagrun_duration_seconds"
+    timer_type: histogram
+    labels:
+      dag_id: "$1"
+      status: "failed"
+
+  # airflow.dagrun.<dag_id>.first_task_scheduling_delay - queue latency,
+  # the earliest signal that the scheduler itself is falling behind.
+  - match: "airflow.dagrun.*.first_task_scheduling_delay"
+    name: "airflow_dagrun_first_task_scheduling_delay_seconds"
+    timer_type: histogram
+    labels:
+      dag_id: "$1"
+
+  # airflow.ti_failures / airflow.ti_successes - task instance outcomes.
+  - match: "airflow.ti_failures"
+    name: "airflow_task_instance_failures_total"
+    match_metric_type: counter
+
+  - match: "airflow.ti_successes"
+    name: "airflow_task_instance_successes_total"
+    match_metric_type: counter
+
+  # airflow.task_instance_created-<operator_class> - fan-out per operator.
+  - match: "airflow.task_instance_created-*"
+    name: "airflow_task_instance_created_total"
+    match_metric_type: counter
+    labels:
+      operator: "$1"
+
+  # airflow.scheduler.heartbeat - the scheduler process's own liveness
+  # signal. A gap here means the scheduler has stalled, not just a DAG.
+  - match: "airflow.scheduler.heartbeat"
+    name: "airflow_scheduler_heartbeat_total"
+    match_metric_type: counter
+
+  # airflow.scheduler.tasks.starving / airflow.scheduler.tasks.running -
+  # scheduler-level queue depth, useful for capacity alerts.
+  - match: "airflow.scheduler.tasks.*"
+    name: "airflow_scheduler_tasks"
+    labels:
+      state: "$1"
+
+  # airflow.pool.open_slots.<pool_name> / airflow.pool.queued_slots.<pool_name>
+  - match: "airflow.pool.open_slots.*"
+    name: "airflow_pool_open_slots"
+    labels:
+      pool: "$1"
+
+  - match: "airflow.pool.queued_slots.*"
+    name: "airflow_pool_queued_slots"
+    labels:
+      pool: "$1"
+
+  - match: "airflow.pool.running_slots.*"
+    name: "airflow_pool_running_slots"
+    labels:
+      pool: "$1"
+
+  - match: "airflow.pool.starving_tasks.*"
+    name: "airflow_pool_starving_tasks"
+    labels:
+      pool: "$1"
+
+  # airflow.executor.open_slots / queued_tasks / running_tasks - executor
+  # capacity, the signal that predicts whether new DAG runs will queue.
+  - match: "airflow.executor.*"
+    name: "airflow_executor"
+    labels:
+      metric: "$1"
+
+  # Catch-all so an unmapped Airflow metric is still visible (with a
+  # generic name) rather than silently dropped - better to notice a gap
+  # in this mapping file than to lose a signal outright.
+  - match: "airflow.*"
+    name: "airflow_unmapped"
+    labels:
+      metric: "$1"

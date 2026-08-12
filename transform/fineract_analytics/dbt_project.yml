@@ -1,0 +1,108 @@
+name: 'fineract_analytics'
+version: '1.0.0'
+config-version: 2
+
+profile: 'fineract_analytics'
+
+model-paths: ["models"]
+analysis-paths: ["analyses"]
+test-paths: ["tests"]
+seed-paths: ["seeds"]
+macro-paths: ["macros"]
+snapshot-paths: ["snapshots"]
+clean-targets: ["target", "dbt_packages"]
+
+# ---------------------------------------------------------------------
+# Project variables
+# ---------------------------------------------------------------------
+vars:
+  # Lookback for incremental models. Wider than the expected CDC lag so a
+  # late-arriving change (connector restart, backfill) is still picked up.
+  # Cheap insurance: the incremental key is a unique key, so re-processing
+  # a row is a no-op.
+  cdc_lookback_hours: 48
+
+  # Portfolio-at-Risk buckets, in days past due. Defined once here so the
+  # mart, the ML features and the dashboards cannot drift apart.
+  par_buckets: [1, 30, 60, 90, 180]
+
+  # Anything past this is treated as written-off for risk aggregation.
+  default_threshold_days: 90
+
+  # Reporting calendar bounds for dim_date.
+  date_spine_start: '2015-01-01'
+  date_spine_end: '2030-12-31'
+
+# ---------------------------------------------------------------------
+# Materialization strategy
+#
+# staging       -> table. Views would re-run the CDC de-duplication on
+#                  every downstream query; the de-dup is the expensive
+#                  part, so it is paid once per run instead.
+# intermediate  -> ephemeral where it is only glue, table where it is
+#                  reused by more than one mart.
+# marts / ml    -> table, with explicit ClickHouse engine + ORDER BY.
+#                  ORDER BY is the primary index in ClickHouse, so it is
+#                  chosen per model from the actual filter patterns, never
+#                  left to default.
+# ---------------------------------------------------------------------
+models:
+  fineract_analytics:
+    +persist_docs:
+      relation: true
+      columns: true
+
+    staging:
+      +schema: staging
+      +materialized: table
+      +engine: MergeTree()
+      +tags: ['staging', 'cdc']
+
+    intermediate:
+      +schema: intermediate
+      +materialized: table
+      +engine: MergeTree()
+      +tags: ['intermediate']
+
+    marts:
+      +schema: marts
+      +materialized: table
+      +tags: ['marts']
+      core:
+        +tags: ['core']
+      finance:
+        +tags: ['finance']
+
+    ml:
+      +schema: ml
+      +materialized: table
+      +tags: ['ml', 'features']
+
+seeds:
+  fineract_analytics:
+    +schema: staging
+    +quote_columns: false
+    seed_loan_status:
+      +column_types:
+        status_id: Int32
+        status_code: String
+        status_group: String
+        is_terminal: UInt8
+    seed_par_buckets:
+      +column_types:
+        bucket_order: Int32
+        bucket_name: String
+        min_days: Int32
+        max_days: Int32
+
+tests:
+  fineract_analytics:
+    +store_failures: true
+    +schema: dq_failures
+    +severity: error
+
+on-run-start:
+  - "{{ log('dbt run starting against ' ~ target.name ~ ' (' ~ target.schema ~ ')', info=true) }}"
+
+on-run-end:
+  - "{{ log('dbt run finished: ' ~ results | length ~ ' nodes', info=true) }}"

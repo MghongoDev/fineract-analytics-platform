@@ -1,0 +1,41 @@
+# =====================================================================
+# datasources.yml
+#
+# Prometheus is the default and only datasource required by the shipped
+# dashboards - every panel in observability/grafana/dashboards queries
+# metrics, not raw warehouse tables, so that dashboards keep working even
+# when ClickHouse is under load or temporarily down.
+# =====================================================================
+apiVersion: 1
+
+datasources:
+  - name: Prometheus
+    type: prometheus
+    access: proxy
+    url: http://prometheus:9090
+    isDefault: true
+    editable: false
+    jsonData:
+      timeInterval: 15s
+
+  # Optional: lets an operator drop down to raw SQL against ClickHouse
+  # (e.g. to inspect fineract_raw.cdc_errors payloads during an incident)
+  # without leaving Grafana. Requires the grafana-clickhouse-datasource
+  # plugin to be installed in the image
+  # (GF_INSTALL_PLUGINS=grafana-clickhouse-datasource); Grafana silently
+  # ignores this entry if the plugin is absent, so it is safe to leave
+  # provisioned even on a minimal image.
+  - name: ClickHouse
+    type: grafana-clickhouse-datasource
+    access: proxy
+    url: http://clickhouse:8123
+    editable: false
+    isDefault: false
+    jsonData:
+      port: 9000
+      host: clickhouse
+      protocol: native
+      defaultDatabase: fineract_ops
+    secureJsonData:
+      username: analytics
+      password: analytics
