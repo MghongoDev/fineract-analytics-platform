@@ -4,7 +4,7 @@
         engine='MergeTree()',
         partition_by='toYYYYMM(observation_date)',
         order_by='(observation_date, loan_id)',
-        settings={'index_granularity': 8192}
+        settings={'index_granularity': 8192, 'allow_nullable_key': 1}
     )
 }}
 

@@ -57,6 +57,7 @@ x-airflow-common: &airflow-common
     PYTHONPATH: /opt/airflow/plugins:/opt/airflow/dags
     DBT_PROJECT_DIR: /opt/airflow/dbt
     DBT_PROFILES_DIR: /opt/airflow/dbt
+    POSTGRES_PORT: "5432"
   volumes:
     - ./orchestration/dags:/opt/airflow/dags:ro
     - ./orchestration/plugins:/opt/airflow/plugins:ro
@@ -210,7 +211,7 @@ services:
     volumes:
       - kafka-data:/var/lib/kafka/data
     healthcheck:
-      test: ["CMD-SHELL", "kafka-broker-api-versions --bootstrap-server localhost:29092 >/dev/null 2>&1 || exit 1"]
+      test: ["CMD-SHELL", "kafka-broker-api-versions --bootstrap-server kafka:29092 >/dev/null 2>&1 || exit 1"]
       interval: 15s
       timeout: 10s
       retries: 20
@@ -247,14 +248,10 @@ services:
       DEBEZIUM_PASSWORD: ${DEBEZIUM_PASSWORD:-debezium}
       CONNECT_CONFIG_PROVIDERS: env
       CONNECT_CONFIG_PROVIDERS_ENV_CLASS: org.apache.kafka.common.config.provider.EnvVarConfigProvider
-      # JMX -> Prometheus, so connector throughput and task state are
-      # visible next to everything else rather than only in Connect logs.
-      KAFKA_OPTS: "-javaagent:/kafka/jmx_prometheus_javaagent.jar=9404:/kafka/etc/jmx-exporter.yml"
       JMXHOST: localhost
       JMXPORT: 1976
     ports:
       - "${CONNECT_PORT:-8083}:8083"
-      - "9404:9404"
     volumes:
       - ./platform/kafka/jmx-exporter.yml:/kafka/etc/jmx-exporter.yml:ro
     healthcheck:
@@ -282,7 +279,8 @@ services:
     command:
       - |
         apt-get update -qq && apt-get install -y -qq curl >/dev/null
-        bash /cdc/scripts/register-connectors.sh
+        sed 's/\r$//' /cdc/scripts/register-connectors.sh > /tmp/register-connectors.sh
+        CONNECTOR_DIR=/cdc/debezium bash /tmp/register-connectors.sh
     restart: "no"
     logging: *default-logging
     networks: [fineract-net]
@@ -320,7 +318,7 @@ services:
     volumes:
       - clickhouse-data:/var/lib/clickhouse
       - ./platform/clickhouse/config:/etc/clickhouse-server/config.d:ro
-      - ./platform/clickhouse/users:/etc/clickhouse-server/users.d:ro
+      - ./platform/clickhouse/users/00-profiles.xml:/etc/clickhouse-server/users.d/00-profiles.xml:ro
       # Runs once on first boot, in lexical order. Order matters: the
       # Kafka engine tables must exist before the MVs that read them.
       - ./platform/clickhouse/init:/docker-entrypoint-initdb.d:ro
@@ -331,7 +329,7 @@ services:
     ulimits:
       nofile: { soft: 262144, hard: 262144 }
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://localhost:8123/ping | grep -q Ok"]
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8123/ping | grep -q Ok"]
       interval: 10s
       timeout: 5s
       retries: 20
@@ -353,6 +351,7 @@ services:
         condition: service_healthy
     environment:
       POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
       PROMETHEUS_PUSHGATEWAY_URL: http://pushgateway:9091
     # Does nothing until asked: `make ingest` or the Airflow DAG drives it.
     command: ["--help"]

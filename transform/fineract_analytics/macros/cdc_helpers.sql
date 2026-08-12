@@ -71,10 +71,11 @@
     a window is free (unique_key makes it idempotent); missing an event
     is not.
 #}
-{% macro incremental_cdc_filter(timestamp_column='_source_commit_at') -%}
+{% macro incremental_cdc_filter(timestamp_column='_source_commit_at', target_timestamp_column=None) -%}
     {% if is_incremental() %}
+    {% set target_column = target_timestamp_column or timestamp_column %}
     {{ timestamp_column }} >= (
-        SELECT ifNull(max({{ timestamp_column }}), toDateTime64('1970-01-01 00:00:00', 3, 'UTC'))
+        SELECT ifNull(max({{ target_column }}), toDateTime64('1970-01-01 00:00:00', 3, 'UTC'))
              - INTERVAL {{ var('cdc_lookback_hours', 48) }} HOUR
         FROM {{ this }}
     )
