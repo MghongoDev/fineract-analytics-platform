@@ -11,7 +11,7 @@
 # The ingestion package is installed here too, so the pipeline DAG can
 # call it in-process and its logs land in the Airflow task log.
 # =====================================================================
-FROM apache/airflow:2.10.5-python3.11
+FROM apache/airflow:3.3.0-python3.11
 
 USER root
 RUN apt-get update \
