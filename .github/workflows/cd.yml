@@ -100,7 +100,7 @@ jobs:
 
       - name: Set up Docker Buildx
         if: steps.exists.outputs.found == 'true'
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
 
       - name: Log in to ghcr.io
         if: steps.exists.outputs.found == 'true'
