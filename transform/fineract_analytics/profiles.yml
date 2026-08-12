@@ -37,6 +37,8 @@ fineract_analytics:
         async_insert: 0
         # Fail loudly rather than silently truncating a bad cast.
         input_format_null_as_default: 0
+        # Required by the point-in-time ML feature joins on prior dates.
+        allow_experimental_join_condition: 1
         # Deduplicate identical INSERT blocks on retry.
         insert_deduplicate: 1
       threads: "{{ env_var('DBT_THREADS', '4') | int }}"

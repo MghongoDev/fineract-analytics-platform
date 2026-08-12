@@ -113,7 +113,7 @@ intervals as (
 )
 
 select
-    coalesce(r.loan_id, d.loan_id, a.loan_id)                       as loan_id,
+    coalesce(r.loan_id, d.loan_id, a.loan_id, i.loan_id)            as loan_id,
 
     -- repayments
     coalesce(r.repayment_count, 0)                                  as repayment_count,
@@ -155,6 +155,54 @@ select
                                                                     as repayment_regularity_cv
 
 from repayments r
-full outer join disbursements d on r.loan_id = d.loan_id
-full outer join anomalies a on coalesce(r.loan_id, d.loan_id) = a.loan_id
-left join intervals i on coalesce(r.loan_id, d.loan_id, a.loan_id) = i.loan_id
+left join disbursements d on r.loan_id = d.loan_id
+left join anomalies a on r.loan_id = a.loan_id
+left join intervals i on r.loan_id = i.loan_id
+
+union all
+
+select
+    coalesce(d.loan_id, a.loan_id, i.loan_id)                       as loan_id,
+
+    -- repayments
+    0                                                               as repayment_count,
+    0                                                               as total_repaid,
+    0                                                               as principal_repaid,
+    0                                                               as interest_repaid,
+    0                                                               as fees_repaid,
+    0                                                               as penalties_repaid,
+    null                                                            as first_repayment_date,
+    null                                                            as last_repayment_date,
+    null                                                            as avg_repayment_amount,
+    null                                                            as stddev_repayment_amount,
+    null                                                            as median_repayment_amount,
+    null                                                            as max_repayment_amount,
+    0                                                               as active_repayment_months,
+
+    -- disbursements
+    coalesce(d.disbursement_count, 0)                               as disbursement_count,
+    coalesce(d.total_disbursed, 0)                                  as total_disbursed,
+    d.first_disbursement_date                                   as first_disbursement_date,
+    d.last_disbursement_date                                    as last_disbursement_date,
+
+    -- anomalies
+    coalesce(a.reversed_transaction_count, 0)                       as reversed_transaction_count,
+    coalesce(a.write_off_transaction_count, 0)                      as write_off_transaction_count,
+    coalesce(a.interest_waiver_count, 0)                            as interest_waiver_count,
+    coalesce(a.recovery_count, 0)                                   as recovery_count,
+    coalesce(a.total_transaction_count, 0)                          as total_transaction_count,
+    a.last_activity_date                                        as last_activity_date,
+    if(a.last_activity_date is null, null,
+       dateDiff('day', a.last_activity_date, today()))              as days_since_last_activity,
+
+    -- regularity
+    i.avg_days_between_repayments                               as avg_days_between_repayments,
+    i.stddev_days_between_repayments                            as stddev_days_between_repayments,
+    i.max_days_between_repayments                               as max_days_between_repayments,
+    {{ safe_divide('i.stddev_days_between_repayments', 'nullIf(i.avg_days_between_repayments, 0)') }}
+                                                                    as repayment_regularity_cv
+
+from disbursements d
+left join anomalies a on d.loan_id = a.loan_id
+left join intervals i on d.loan_id = i.loan_id
+where d.loan_id not in (select loan_id from repayments)
