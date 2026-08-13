@@ -1,4 +1,4 @@
-# =====================================================================
+﻿# =====================================================================
 # Fineract analytics platform - the whole stack, one command.
 #
 #   make up          everything
@@ -293,7 +293,7 @@ services:
         condition: service_healthy
     environment:
       KAFKA_CLUSTERS_0_NAME: fineract
-      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:29092
+      KAFKA_CLUSTERS_0_BOOTSTRAP_SERVERS: kafka:29092
       KAFKA_CLUSTERS_0_KAFKACONNECT_0_NAME: debezium
       KAFKA_CLUSTERS_0_KAFKACONNECT_0_ADDRESS: http://kafka-connect:8083
       DYNAMIC_CONFIG_ENABLED: "true"
@@ -592,3 +592,4 @@ volumes:
   prometheus-data:
   grafana-data:
   pushgateway-data:
+

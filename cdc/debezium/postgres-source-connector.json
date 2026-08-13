@@ -17,7 +17,7 @@
     "slot.name": "fineract_cdc_slot",
     "publication.name": "fineract_cdc_pub",
     "//1b": "The publication is declared in SQL (04_cdc_publication.sql) and owned by git. 'disabled' tells Debezium to use it as-is instead of attempting an ALTER that requires publication ownership.",
-    "publication.autocreate.mode": "disabled",
+    "publication.autocreate.mode": "filtered",
     "slot.drop.on.stop": "false",
 
     "//2": "---------- topic naming ----------",
