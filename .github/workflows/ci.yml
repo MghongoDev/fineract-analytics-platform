@@ -1,4 +1,4 @@
-name: CI
+﻿name: CI
 
 # Every push to a long-lived branch and every PR gets the full graph.
 # workflow_dispatch lets an operator re-run the whole thing by hand (e.g.
@@ -26,7 +26,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@v4
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -97,7 +97,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@v4
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -133,7 +133,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@v4
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -164,7 +164,7 @@ jobs:
         working-directory: transform/fineract_analytics
     steps:
       - name: Check out repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@v4
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -296,7 +296,7 @@ jobs:
           --health-retries 10
     steps:
       - name: Check out repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@v4
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -408,7 +408,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@v4
 
       # A typo in a Debezium connector config (wrong plugin.name, a
       # forgotten heartbeat, decimal.handling.mode left at the 'precise'
@@ -478,7 +478,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@v4
 
       - name: docker compose config -q
         run: |
@@ -554,7 +554,7 @@ jobs:
             dockerfile: observability/exporter/Dockerfile
     steps:
       - name: Check out repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@v4
 
       - name: Check whether ${{ matrix.dockerfile }} exists yet
         id: exists
@@ -668,3 +668,4 @@ jobs:
             exit 1
           fi
           echo "All required jobs passed."
+
