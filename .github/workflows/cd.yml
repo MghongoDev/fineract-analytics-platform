@@ -1,4 +1,4 @@
-name: CD
+﻿name: CD
 
 # Deploys happen from an annotated release tag, or by hand for a
 # controlled re-deploy / rollback of an already-built version. Nothing
@@ -38,7 +38,7 @@ jobs:
       sha: ${{ steps.resolve.outputs.sha }}
     steps:
       - name: Check out repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@v4
         with:
           ref: ${{ github.event.inputs.ref || github.ref }}
           fetch-depth: 0
@@ -84,7 +84,7 @@ jobs:
             dockerfile: observability/exporter/Dockerfile
     steps:
       - name: Check out repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@v4
         with:
           ref: ${{ needs.verify-ci.outputs.sha }}
 
@@ -142,7 +142,7 @@ jobs:
     environment: ${{ github.event.inputs.environment || 'staging' }}
     steps:
       - name: Check out repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@v4
         with:
           ref: ${{ needs.verify-ci.outputs.sha }}
 
@@ -253,3 +253,4 @@ jobs:
             echo "   redeployed directly without a rebuild."
             echo "4. Check the smoke-check job output above for which freshness metric failed before re-attempting."
           } >> "$GITHUB_STEP_SUMMARY"
+
