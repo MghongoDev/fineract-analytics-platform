@@ -14,8 +14,9 @@ Each spec declares
 
 from __future__ import annotations
 
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
-from typing import Any, Callable, Mapping, Optional
+from typing import Any
 
 from .parsers import (
     dig,
@@ -37,11 +38,12 @@ class Expectation:
     """A declarative data-quality assertion evaluated on the mapped batch."""
 
     name: str
-    kind: str                       # not_null | unique | non_negative | range | freshness | row_count_min
+    # not_null | unique | non_negative | range | freshness | row_count_min
+    kind: str
     columns: tuple[str, ...] = ()
     severity: str = "error"         # error -> fails the run; warn -> logged + metric only
-    min_value: Optional[float] = None
-    max_value: Optional[float] = None
+    min_value: float | None = None
+    max_value: float | None = None
 
 
 @dataclass(frozen=True)
@@ -56,8 +58,8 @@ class EntitySpec:
     #: full     - re-read the whole collection each run (small dimensions)
     #: parent   - iterate parent ids and pull a child collection per parent
     mode: str = "full"
-    parent_entity: Optional[str] = None
-    parent_id_query: Optional[str] = None
+    parent_entity: str | None = None
+    parent_id_query: str | None = None
     expectations: tuple[Expectation, ...] = ()
     description: str = ""
 

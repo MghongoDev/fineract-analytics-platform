@@ -17,15 +17,16 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections.abc import Iterable, Mapping, Sequence
 from datetime import date, datetime, timezone
 from decimal import Decimal, InvalidOperation
-from typing import Any, Iterable, Mapping, Optional, Sequence
+from typing import Any
 
 
 # ---------------------------------------------------------------------
 # Dates
 # ---------------------------------------------------------------------
-def parse_date(value: Any) -> Optional[date]:
+def parse_date(value: Any) -> date | None:
     """Parse any of Fineract's date encodings into a ``date``."""
     if value is None or value == "":
         return None
@@ -63,7 +64,7 @@ def parse_date(value: Any) -> Optional[date]:
     return None
 
 
-def parse_timestamp(value: Any) -> Optional[datetime]:
+def parse_timestamp(value: Any) -> datetime | None:
     """Parse a Fineract timestamp into a timezone-aware ``datetime``."""
     if value is None or value == "":
         return None
@@ -96,7 +97,7 @@ def parse_timestamp(value: Any) -> Optional[datetime]:
 # ---------------------------------------------------------------------
 # Scalars
 # ---------------------------------------------------------------------
-def parse_decimal(value: Any) -> Optional[Decimal]:
+def parse_decimal(value: Any) -> Decimal | None:
     """Money-safe numeric parse. Never float - these are ledger amounts."""
     if value is None or value == "":
         return None
@@ -108,7 +109,7 @@ def parse_decimal(value: Any) -> Optional[Decimal]:
         return None
 
 
-def parse_int(value: Any) -> Optional[int]:
+def parse_int(value: Any) -> int | None:
     if value is None or value == "":
         return None
     try:
@@ -120,7 +121,7 @@ def parse_int(value: Any) -> Optional[int]:
             return None
 
 
-def parse_bool(value: Any) -> Optional[bool]:
+def parse_bool(value: Any) -> bool | None:
     if value is None or value == "":
         return None
     if isinstance(value, bool):
@@ -130,7 +131,7 @@ def parse_bool(value: Any) -> Optional[bool]:
     return str(value).strip().lower() in {"true", "1", "yes", "y"}
 
 
-def parse_text(value: Any, max_length: Optional[int] = None) -> Optional[str]:
+def parse_text(value: Any, max_length: int | None = None) -> str | None:
     if value is None:
         return None
     text = str(value).strip()
@@ -152,7 +153,7 @@ def dig(payload: Mapping[str, Any], *path: str, default: Any = None) -> Any:
     return current if current is not None else default
 
 
-def enum_value(payload: Mapping[str, Any], key: str, attribute: str = "value") -> Optional[str]:
+def enum_value(payload: Mapping[str, Any], key: str, attribute: str = "value") -> str | None:
     """Fineract enums are ``{"id": 300, "code": "...", "value": "Active"}``."""
     node = payload.get(key)
     if isinstance(node, Mapping):
@@ -160,7 +161,7 @@ def enum_value(payload: Mapping[str, Any], key: str, attribute: str = "value") -
     return parse_text(node)
 
 
-def enum_id(payload: Mapping[str, Any], key: str) -> Optional[int]:
+def enum_id(payload: Mapping[str, Any], key: str) -> int | None:
     node = payload.get(key)
     if isinstance(node, Mapping):
         return parse_int(node.get("id"))

@@ -102,7 +102,7 @@ class TestRecordValidation:
 
     def test_a_record_with_only_a_key_is_rejected(self):
         spec = ENTITIES["clients"]
-        mapped = {key: None for key in spec.mapper({})}
+        mapped = dict.fromkeys(spec.mapper({}))
         mapped["client_id"] = 1
         rejection = validate_record(spec, mapped, {})
         assert rejection is not None

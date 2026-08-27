@@ -5,8 +5,9 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Any, Optional, Sequence
+from typing import Any
 
 from airflow.exceptions import AirflowFailException, AirflowSkipException
 from airflow.models import BaseOperator
@@ -36,11 +37,11 @@ class DbtOperator(BaseOperator):
 
     def __init__(self,
                  command: str = "run",
-                 select: Optional[str] = None,
-                 exclude: Optional[str] = None,
-                 vars: Optional[dict] = None,      # noqa: A002 - dbt's own name
+                 select: str | None = None,
+                 exclude: str | None = None,
+                 vars: dict | None = None,      # noqa: A002 - dbt's own name
                  full_refresh: bool = False,
-                 target: Optional[str] = None,
+                 target: str | None = None,
                  fail_fast: bool = False,
                  warn_error: bool = False,
                  project_dir: str = DBT_PROJECT_DIR,
@@ -185,8 +186,10 @@ class PublishDbtResultsOperator(BaseOperator):
                 model_rows.append(
                     f"('{invocation_id}', '{dag_run_id}', '{executed_at}', "
                     f"'{self._escape(unique_id)}', '{self._escape(name)}', "
-                    f"'{layer}', '{self._escape(result.get('adapter_response', {}).get('materialization', ''))}', "
-                    f"'{status}', {int(result.get('adapter_response', {}).get('rows_affected') or 0)}, "
+                    f"'{layer}', "
+                    f"'{self._escape(result.get('adapter_response', {}).get('materialization', ''))}', "  # noqa: E501
+                    f"'{status}', "
+                    f"{int(result.get('adapter_response', {}).get('rows_affected') or 0)}, "
                     f"{timing}, '{message}')")
 
         clickhouse = ClickHouseHook(database="fineract_ops")
@@ -247,7 +250,7 @@ class DataQualityGateOperator(BaseOperator):
          "==", 0, False),
     )
 
-    def __init__(self, checks: Optional[Sequence[tuple]] = None, **kwargs: Any):
+    def __init__(self, checks: Sequence[tuple] | None = None, **kwargs: Any):
         super().__init__(**kwargs)
         self.checks = list(checks or self.DEFAULT_CHECKS)
 

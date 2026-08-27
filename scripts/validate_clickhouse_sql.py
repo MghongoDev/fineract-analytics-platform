@@ -24,14 +24,14 @@ from __future__ import annotations
 import argparse
 import re
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 try:
     import chdb
 except ImportError:  # pragma: no cover
     print("chdb is required: pip install chdb", file=sys.stderr)
-    raise SystemExit(2)
+    raise SystemExit(2) from None
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 INIT_DIR = REPO_ROOT / "platform" / "clickhouse" / "init"
@@ -60,10 +60,12 @@ def stub_kafka_engines(sql: str) -> str:
     # column list (the last ')' before 'ENGINE = Kafka').
     def rewrite(match: re.Match) -> str:
         body = match.group("body")
-        return f"{match.group('head')}{body}{KAFKA_VIRTUAL_COLUMNS})\nENGINE = MergeTree ORDER BY tuple()"
+        return (f"{match.group('head')}{body}{KAFKA_VIRTUAL_COLUMNS})\n"
+                f"ENGINE = MergeTree ORDER BY tuple()")
 
     pattern = re.compile(
-        r"(?P<head>CREATE TABLE IF NOT EXISTS [\w.]+\s*\()(?P<body>.*?)\)\s*ENGINE\s*=\s*Kafka\s*SETTINGS.*?(?=;)",
+        r"(?P<head>CREATE TABLE IF NOT EXISTS [\w.]+\s*\()"
+        r"(?P<body>.*?)\)\s*ENGINE\s*=\s*Kafka\s*SETTINGS.*?(?=;)",
         re.DOTALL | re.IGNORECASE,
     )
     return pattern.sub(rewrite, sql)
@@ -99,7 +101,7 @@ def apply_file(session: Session, path: Path, transform=None) -> int:
 
 def round_trip_check(session: Session) -> None:
     """Push one synthetic Debezium row through every conversion path."""
-    now_ms = int(datetime(2026, 8, 11, 9, 30, tzinfo=timezone.utc).timestamp() * 1000)
+    now_ms = int(datetime(2026, 8, 11, 9, 30, tzinfo=UTC).timestamp() * 1000)
     epoch_days = 20_678          # 2026-08-11
 
     # -- loans: decimals, dates, bools, delete flag --------------------

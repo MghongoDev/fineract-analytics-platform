@@ -51,7 +51,8 @@ class ClickHouseConfig:
     http_port: int = field(default_factory=lambda: _env_int("CLICKHOUSE_HTTP_PORT", 8123))
     user: str = field(default_factory=lambda: _env("CLICKHOUSE_USER", "analytics"))
     password: str = field(default_factory=lambda: _env("CLICKHOUSE_PASSWORD", "analytics"))
-    request_timeout: float = field(default_factory=lambda: float(_env("CLICKHOUSE_HTTP_TIMEOUT", "10")))
+    request_timeout: float = field(
+        default_factory=lambda: float(_env("CLICKHOUSE_HTTP_TIMEOUT", "10")))
 
 
 @dataclass(frozen=True)

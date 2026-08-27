@@ -20,8 +20,9 @@ from __future__ import annotations
 
 import time
 import uuid
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
-from typing import Any, Iterable, Mapping, Optional, Sequence
+from typing import Any
 
 from .client import FineractClient, FineractError
 from .config import Settings
@@ -48,7 +49,7 @@ class EntityOutcome:
     result: LoadResult
     duration_seconds: float
     expectations: list[ExpectationResult] = field(default_factory=list)
-    error: Optional[str] = None
+    error: str | None = None
 
     @property
     def ok(self) -> bool:
@@ -56,10 +57,10 @@ class EntityOutcome:
 
 
 class IngestionPipeline:
-    def __init__(self, settings: Optional[Settings] = None,
-                 client: Optional[FineractClient] = None,
-                 loader: Optional[PostgresLoader] = None,
-                 metrics: Optional[IngestionMetrics] = None):
+    def __init__(self, settings: Settings | None = None,
+                 client: FineractClient | None = None,
+                 loader: PostgresLoader | None = None,
+                 metrics: IngestionMetrics | None = None):
         self.settings = settings or Settings.load()
         self.client = client or FineractClient(self.settings.fineract)
         self.loader = loader or PostgresLoader(self.settings.postgres)
@@ -75,7 +76,7 @@ class IngestionPipeline:
     # Fetch
     # ------------------------------------------------------------------
     def _fetch_records(self, spec: EntitySpec,
-                       parent_limit: Optional[int] = None) -> Iterable[Mapping[str, Any]]:
+                       parent_limit: int | None = None) -> Iterable[Mapping[str, Any]]:
         """Yield raw API records for an entity, flat or parent-driven."""
         if spec.mode == "parent":
             parent_ids = self.loader.fetch_parent_ids(spec.parent_id_query or "", parent_limit)
@@ -142,7 +143,7 @@ class IngestionPipeline:
     # ------------------------------------------------------------------
     # Run one entity
     # ------------------------------------------------------------------
-    def run_entity(self, entity_name: str, parent_limit: Optional[int] = None,
+    def run_entity(self, entity_name: str, parent_limit: int | None = None,
                    dry_run: bool = False) -> EntityOutcome:
         spec = get_entity(entity_name)
         started = time.monotonic()
@@ -249,7 +250,7 @@ class IngestionPipeline:
             return EntityOutcome(entity_name, "failed", failed, duration, error=str(exc))
 
     @staticmethod
-    def _cursor_value(spec: EntitySpec, rows: Sequence[Mapping[str, Any]]) -> Optional[str]:
+    def _cursor_value(spec: EntitySpec, rows: Sequence[Mapping[str, Any]]) -> str | None:
         if not rows:
             return None
         keys = [r.get(spec.primary_key) for r in rows if r.get(spec.primary_key) is not None]
@@ -258,8 +259,8 @@ class IngestionPipeline:
     # ------------------------------------------------------------------
     # Run many
     # ------------------------------------------------------------------
-    def run(self, entities: Optional[Sequence[str]] = None,
-            parent_limit: Optional[int] = None,
+    def run(self, entities: Sequence[str] | None = None,
+            parent_limit: int | None = None,
             dry_run: bool = False,
             fail_fast: bool = False) -> list[EntityOutcome]:
         selected = list(entities) if entities else list(DEFAULT_ORDER)

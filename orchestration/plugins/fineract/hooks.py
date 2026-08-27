@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import json
 import os
-from typing import Any, Optional
+from typing import Any
 
 import requests
 
@@ -30,8 +30,8 @@ class ClickHouseHook:
     overhead is irrelevant.
     """
 
-    def __init__(self, host: Optional[str] = None, port: Optional[int] = None,
-                 user: Optional[str] = None, password: Optional[str] = None,
+    def __init__(self, host: str | None = None, port: int | None = None,
+                 user: str | None = None, password: str | None = None,
                  database: str = "default", timeout: int = 120):
         self.host = host or _env("CLICKHOUSE_HOST", "clickhouse")
         self.port = port or int(_env("CLICKHOUSE_HTTP_PORT", "8123"))
@@ -44,7 +44,7 @@ class ClickHouseHook:
     def url(self) -> str:
         return f"http://{self.host}:{self.port}/"
 
-    def execute(self, query: str, params: Optional[dict] = None) -> str:
+    def execute(self, query: str, params: dict | None = None) -> str:
         response = requests.post(
             self.url,
             params={"database": self.database, **(params or {})},
@@ -91,10 +91,9 @@ class PostgresHook:
     def query(self, sql: str, args: tuple = ()) -> list[tuple]:
         import psycopg
 
-        with psycopg.connect(self.dsn) as connection:
-            with connection.cursor() as cursor:
-                cursor.execute(sql, args)
-                return cursor.fetchall() if cursor.description else []
+        with psycopg.connect(self.dsn) as connection, connection.cursor() as cursor:
+            cursor.execute(sql, args)
+            return cursor.fetchall() if cursor.description else []
 
     def scalar(self, sql: str, args: tuple = ()) -> Any:
         rows = self.query(sql, args)
@@ -110,7 +109,7 @@ class PostgresHook:
 class KafkaConnectHook:
     """Kafka Connect REST client - used to assert the CDC path is alive."""
 
-    def __init__(self, url: Optional[str] = None, timeout: int = 30):
+    def __init__(self, url: str | None = None, timeout: int = 30):
         self.url = (url or _env("KAFKA_CONNECT_URL", "http://kafka-connect:8083")).rstrip("/")
         self.timeout = timeout
 

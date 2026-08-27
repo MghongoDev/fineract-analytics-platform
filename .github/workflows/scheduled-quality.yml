@@ -40,8 +40,19 @@ jobs:
         working-directory: transform/fineract_analytics
         run: dbt deps
 
+      - name: Check if production secrets are configured
+        id: check_secrets
+        run: |
+          if [ -z "${{ secrets.CLICKHOUSE_HOST }}" ]; then
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::Production secrets not configured. Skipping quality checks."
+          else
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: dbt source freshness (production)
         id: freshness
+        if: steps.check_secrets.outputs.configured == 'true'
         working-directory: transform/fineract_analytics
         env:
           DBT_TARGET: prod
@@ -54,6 +65,7 @@ jobs:
 
       - name: Reconciliation check (production)
         id: reconciliation
+        if: steps.check_secrets.outputs.configured == 'true'
         env:
           POSTGRES_HOST: ${{ secrets.PROD_POSTGRES_HOST }}
           POSTGRES_PORT: ${{ secrets.PROD_POSTGRES_PORT }}
@@ -70,6 +82,12 @@ jobs:
       - name: Gate on results
         id: gate
         run: |
+          if [ "${{ steps.check_secrets.outputs.configured }}" != "true" ]; then
+            echo "status=skipped" >> "$GITHUB_OUTPUT"
+            echo "details=Production secrets not configured. Quality checks skipped." >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
           status="pass"
           details=""
           if [ "${{ steps.freshness.outputs.freshness_failed }}" = "true" ]; then
@@ -91,7 +109,7 @@ jobs:
   file-or-update-issue:
     name: Open/update GitHub issue on failure
     needs: quality-checks
-    if: always() && needs.quality-checks.result == 'failure'
+    if: always() && needs.quality-checks.result == 'failure' && needs.quality-checks.outputs.status != 'skipped'
     runs-on: ubuntu-latest
     permissions:
       issues: write

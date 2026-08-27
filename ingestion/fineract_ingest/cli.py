@@ -15,7 +15,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-from typing import Optional, Sequence
+from collections.abc import Sequence
 
 from .client import FineractClient
 from .config import Settings
@@ -122,7 +122,7 @@ def cmd_heartbeat(settings: Settings) -> int:
         loader.close()
 
 
-def main(argv: Optional[Sequence[str]] = None) -> int:
+def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     settings = Settings.load()
     configure(settings.runtime.log_level, settings.runtime.log_format)

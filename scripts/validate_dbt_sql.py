@@ -33,7 +33,7 @@ import re
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any
 
 try:
     import chdb
@@ -41,7 +41,7 @@ try:
     from jinja2 import Environment, StrictUndefined
 except ImportError:  # pragma: no cover
     print("requires: pip install chdb jinja2 pyyaml", file=sys.stderr)
-    raise SystemExit(2)
+    raise SystemExit(2) from None
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DBT_ROOT = REPO_ROOT / "transform" / "fineract_analytics"
@@ -358,7 +358,8 @@ def seed_raw_layer(engine: Engine) -> None:
             (n.number % 8) + 1,
             'KES',
             [100, 300, 300, 300, 600, 601, 700][(n.number % 7) + 1],
-            ['Submitted','Active','Active','Active','Closed','Written off','Overpaid'][(n.number % 7) + 1],
+            ['Submitted', 'Active', 'Active', 'Active', 'Closed',
+             'Written off', 'Overpaid'][(n.number % 7) + 1],
             if((n.number % 7) + 1 IN (2,3,4), 1, 0),
             if((n.number % 7) + 1 IN (5,6), 1, 0),
             if((n.number % 7) + 1 = 7, 1, 0),

@@ -22,8 +22,9 @@ view in ``platform/clickhouse/init/05_ops_views.sql``.
 
 from __future__ import annotations
 
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
-from typing import Any, Iterable, Mapping, Protocol
+from typing import Any, Protocol
 
 # Reconciliation entities: (entity name, Postgres table, Postgres PK column).
 # Must match fineract_ops.v_reconciliation_counts exactly, entity for entity.
@@ -217,7 +218,9 @@ class CdcParseErrorCollector:
     name = "cdc_parse_errors"
 
     def collect(self, pg: PgExecutor, ch: ChExecutor) -> Mapping[str, list[MetricSample]]:
-        rows = ch.query("SELECT topic, count() AS errors FROM fineract_raw.cdc_errors GROUP BY topic")
+        rows = ch.query(
+            "SELECT topic, count() AS errors "
+            "FROM fineract_raw.cdc_errors GROUP BY topic")
         return {
             "parse_errors_total": [
                 MetricSample({"topic": r["topic"]}, float(r["errors"])) for r in rows
@@ -245,7 +248,7 @@ class ReconciliationCollector:
         ch_counts = {r["entity"]: int(r["live_keys"]) for r in ch_rows}
 
         deltas: list[MetricSample] = []
-        for entity, pg_table, pg_key in RECONCILIATION_ENTITIES:
+        for entity, pg_table, _pg_key in RECONCILIATION_ENTITIES:
             pg_rows = pg.query(f"SELECT count(*) FROM {pg_table}")
             pg_count = int(pg_rows[0][0]) if pg_rows else 0
             ch_count = ch_counts.get(entity, 0)
@@ -262,7 +265,9 @@ class MergeHealthCollector:
     name = "merge_health"
 
     def collect(self, pg: PgExecutor, ch: ChExecutor) -> Mapping[str, list[MetricSample]]:
-        rows = ch.query("SELECT database, table, active_parts, size_mb FROM fineract_ops.v_merge_health")
+        rows = ch.query(
+            "SELECT database, table, active_parts, size_mb "
+            "FROM fineract_ops.v_merge_health")
         parts, bytes_ = [], []
         for r in rows:
             labels = {"database": r["database"], "table": r["table"]}

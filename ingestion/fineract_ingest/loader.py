@@ -24,9 +24,10 @@ inserted / updated / unchanged / rejected.
 from __future__ import annotations
 
 import uuid
+from collections.abc import Iterable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from datetime import datetime, timezone
-from typing import Any, Iterable, Iterator, Mapping, Optional, Sequence
+from typing import Any
 
 import psycopg
 from psycopg import sql
@@ -53,7 +54,7 @@ class LoadResult:
         self.rows_unchanged = 0
         self.rows_rejected = 0
 
-    def merge(self, other: "LoadResult") -> None:
+    def merge(self, other: LoadResult) -> None:
         self.rows_read += other.rows_read
         self.rows_inserted += other.rows_inserted
         self.rows_updated += other.rows_updated
@@ -74,11 +75,11 @@ class LoadResult:
 
 
 class PostgresLoader:
-    def __init__(self, config: Optional[PostgresConfig] = None,
-                 connection: Optional[psycopg.Connection] = None):
+    def __init__(self, config: PostgresConfig | None = None,
+                 connection: psycopg.Connection | None = None):
         self.config = config or PostgresConfig()
         self._external_connection = connection
-        self._connection: Optional[psycopg.Connection] = connection
+        self._connection: psycopg.Connection | None = connection
 
     # ------------------------------------------------------------------
     # Connection handling
@@ -108,7 +109,7 @@ class PostgresLoader:
             connection.rollback()
             raise
 
-    def __enter__(self) -> "PostgresLoader":
+    def __enter__(self) -> PostgresLoader:
         self.connect()
         return self
 
@@ -126,7 +127,7 @@ class PostgresLoader:
             return result
 
         schema_name, table_name = table.split(".", 1)
-        columns = [c for c in rows[0].keys()]
+        columns = list(rows[0].keys())
         update_columns = [c for c in columns if c != primary_key]
 
         statement = sql.SQL("""
@@ -166,7 +167,7 @@ class PostgresLoader:
     # Control plane
     # ------------------------------------------------------------------
     def start_run(self, connection: psycopg.Connection, entity: str,
-                  batch_id: uuid.UUID, dag_run_id: Optional[str]) -> int:
+                  batch_id: uuid.UUID, dag_run_id: str | None) -> int:
         with connection.cursor() as cursor:
             cursor.execute(
                 """
@@ -182,7 +183,7 @@ class PostgresLoader:
 
     def finish_run(self, connection: psycopg.Connection, run_id: int, status: str,
                    result: LoadResult, api_requests: int = 0, api_retries: int = 0,
-                   error_message: Optional[str] = None) -> None:
+                   error_message: str | None = None) -> None:
         with connection.cursor() as cursor:
             cursor.execute(
                 """
@@ -206,7 +207,7 @@ class PostgresLoader:
             )
 
     def update_watermark(self, connection: psycopg.Connection, entity: str,
-                         cursor_value: Optional[str], row_count: int) -> None:
+                         cursor_value: str | None, row_count: int) -> None:
         with connection.cursor() as cursor:
             cursor.execute(
                 """
@@ -226,7 +227,7 @@ class PostgresLoader:
                 (entity, cursor_value, row_count, row_count),
             )
 
-    def read_watermark(self, entity: str) -> Optional[dict[str, Any]]:
+    def read_watermark(self, entity: str) -> dict[str, Any] | None:
         connection = self.connect()
         with connection.cursor() as cursor:
             cursor.execute(
@@ -283,7 +284,7 @@ class PostgresLoader:
     # ------------------------------------------------------------------
     # Helpers used by parent/child ingestion and by the Airflow sensors
     # ------------------------------------------------------------------
-    def fetch_parent_ids(self, query: str, limit: Optional[int] = None) -> list[int]:
+    def fetch_parent_ids(self, query: str, limit: int | None = None) -> list[int]:
         connection = self.connect()
         statement = query if limit is None else f"{query} LIMIT {int(limit)}"
         with connection.cursor() as cursor:

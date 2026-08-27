@@ -15,7 +15,6 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass, field
-from typing import Optional
 
 
 def _env(name: str, default: str = "") -> str:
@@ -67,12 +66,16 @@ class FineractConfig:
     #: misconfigured cursor can never turn into an unbounded crawl.
     max_pages: int = field(default_factory=lambda: _env_int("FINERACT_MAX_PAGES", 500))
 
-    connect_timeout: float = field(default_factory=lambda: _env_float("FINERACT_CONNECT_TIMEOUT", 10.0))
-    read_timeout: float = field(default_factory=lambda: _env_float("FINERACT_READ_TIMEOUT", 60.0))
+    connect_timeout: float = field(
+        default_factory=lambda: _env_float("FINERACT_CONNECT_TIMEOUT", 10.0))
+    read_timeout: float = field(
+        default_factory=lambda: _env_float("FINERACT_READ_TIMEOUT", 60.0))
 
     max_retries: int = field(default_factory=lambda: _env_int("FINERACT_MAX_RETRIES", 5))
-    backoff_base_seconds: float = field(default_factory=lambda: _env_float("FINERACT_BACKOFF_BASE", 0.5))
-    backoff_max_seconds: float = field(default_factory=lambda: _env_float("FINERACT_BACKOFF_MAX", 30.0))
+    backoff_base_seconds: float = field(
+        default_factory=lambda: _env_float("FINERACT_BACKOFF_BASE", 0.5))
+    backoff_max_seconds: float = field(
+        default_factory=lambda: _env_float("FINERACT_BACKOFF_MAX", 30.0))
 
     #: Client-side rate limit (requests/second). Fineract is a
     #: transactional core-banking system: an analytics crawler must never
@@ -106,8 +109,10 @@ class PostgresConfig:
     database: str = field(default_factory=lambda: _env("POSTGRES_DB", "fineract_oltp"))
     user: str = field(default_factory=lambda: _env("POSTGRES_USER", "app_ingest"))
     password: str = field(default_factory=lambda: _env("POSTGRES_PASSWORD", "app_ingest"))
-    connect_timeout: int = field(default_factory=lambda: _env_int("POSTGRES_CONNECT_TIMEOUT", 15))
-    statement_timeout_ms: int = field(default_factory=lambda: _env_int("POSTGRES_STATEMENT_TIMEOUT_MS", 300_000))
+    connect_timeout: int = field(
+        default_factory=lambda: _env_int("POSTGRES_CONNECT_TIMEOUT", 15))
+    statement_timeout_ms: int = field(
+        default_factory=lambda: _env_int("POSTGRES_STATEMENT_TIMEOUT_MS", 300_000))
     batch_size: int = field(default_factory=lambda: _env_int("INGEST_BATCH_SIZE", 1000))
 
     @property
@@ -139,9 +144,10 @@ class RuntimeConfig:
     push_metrics: bool = field(default_factory=lambda: _env_bool("INGEST_PUSH_METRICS", True))
 
     #: Fail the run if the reject ratio for an entity exceeds this.
-    max_reject_ratio: float = field(default_factory=lambda: _env_float("INGEST_MAX_REJECT_RATIO", 0.05))
+    max_reject_ratio: float = field(
+        default_factory=lambda: _env_float("INGEST_MAX_REJECT_RATIO", 0.05))
 
-    dag_run_id: Optional[str] = field(default_factory=lambda: _env("AIRFLOW_CTX_DAG_RUN_ID") or None)
+    dag_run_id: str | None = field(default_factory=lambda: _env("AIRFLOW_CTX_DAG_RUN_ID") or None)
     environment: str = field(default_factory=lambda: _env("ENVIRONMENT", "local"))
 
 
@@ -152,5 +158,5 @@ class Settings:
     runtime: RuntimeConfig = field(default_factory=RuntimeConfig)
 
     @staticmethod
-    def load() -> "Settings":
+    def load() -> Settings:
         return Settings()

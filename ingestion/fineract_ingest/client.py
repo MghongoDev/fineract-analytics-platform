@@ -36,7 +36,8 @@ from __future__ import annotations
 import base64
 import random
 import time
-from typing import Any, Iterator, Optional
+from collections.abc import Iterator
+from typing import Any
 from urllib.parse import urljoin
 
 import requests
@@ -53,7 +54,7 @@ RETRYABLE_STATUS = {408, 425, 429, 500, 502, 503, 504}
 class FineractError(RuntimeError):
     """Raised when the API cannot be read after exhausting retries."""
 
-    def __init__(self, message: str, status_code: Optional[int] = None, body: str = ""):
+    def __init__(self, message: str, status_code: int | None = None, body: str = ""):
         super().__init__(message)
         self.status_code = status_code
         self.body = body[:2000]
@@ -78,14 +79,14 @@ class RateLimiter:
 class FineractClient:
     """Thin, resilient wrapper around the Fineract v1 API."""
 
-    def __init__(self, config: Optional[FineractConfig] = None,
-                 session: Optional[requests.Session] = None):
+    def __init__(self, config: FineractConfig | None = None,
+                 session: requests.Session | None = None):
         self.config = config or FineractConfig()
         self.session = session or requests.Session()
         self.session.mount("https://", HTTPAdapter(pool_connections=4, pool_maxsize=8))
         self.session.mount("http://", HTTPAdapter(pool_connections=4, pool_maxsize=8))
         self._limiter = RateLimiter(self.config.requests_per_second)
-        self._auth_key: Optional[str] = None
+        self._auth_key: str | None = None
 
         # Counters surfaced as Prometheus metrics by the pipeline.
         self.request_count = 0
@@ -149,7 +150,7 @@ class FineractClient:
         base = self.config.base_url.rstrip("/") + "/"
         return urljoin(base, path.lstrip("/"))
 
-    def _sleep_for_attempt(self, attempt: int, retry_after: Optional[str]) -> None:
+    def _sleep_for_attempt(self, attempt: int, retry_after: str | None) -> None:
         if retry_after:
             try:
                 time.sleep(min(float(retry_after), self.config.backoff_max_seconds))
@@ -160,10 +161,10 @@ class FineractClient:
                     self.config.backoff_max_seconds)
         time.sleep(delay * (0.5 + random.random() / 2))  # full-ish jitter
 
-    def get(self, path: str, params: Optional[dict[str, Any]] = None) -> Any:
+    def get(self, path: str, params: dict[str, Any] | None = None) -> Any:
         """GET with retry/backoff. Returns the decoded JSON body."""
         url = self._url(path)
-        last_error: Optional[Exception] = None
+        last_error: Exception | None = None
 
         for attempt in range(self.config.max_retries + 1):
             self._limiter.wait()
@@ -221,7 +222,7 @@ class FineractClient:
     # Pagination
     # ------------------------------------------------------------------
     @staticmethod
-    def _items_of(payload: Any) -> tuple[list[dict], Optional[int]]:
+    def _items_of(payload: Any) -> tuple[list[dict], int | None]:
         """Normalise Fineract's two collection shapes into (items, total)."""
         if isinstance(payload, list):
             return payload, len(payload)
@@ -233,7 +234,7 @@ class FineractClient:
         return [], 0
 
     def iter_pages(self, path: str,
-                   params: Optional[dict[str, Any]] = None,
+                   params: dict[str, Any] | None = None,
                    paged: bool = True) -> Iterator[list[dict]]:
         """Yield successive pages of a collection endpoint.
 
@@ -272,7 +273,7 @@ class FineractClient:
                     "path": path, "max_pages": self.config.max_pages, "fetched": offset})
 
     def iter_items(self, path: str,
-                   params: Optional[dict[str, Any]] = None,
+                   params: dict[str, Any] | None = None,
                    paged: bool = True) -> Iterator[dict]:
         for page in self.iter_pages(path, params=params, paged=paged):
             yield from page
@@ -292,7 +293,7 @@ class FineractClient:
     def close(self) -> None:
         self.session.close()
 
-    def __enter__(self) -> "FineractClient":
+    def __enter__(self) -> FineractClient:
         self.authenticate()
         return self
 

@@ -18,9 +18,10 @@ Two mechanisms, deliberately separated:
 
 from __future__ import annotations
 
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from decimal import Decimal
-from typing import Any, Iterable, Mapping, Optional, Sequence
+from typing import Any
 
 from .entities import EntitySpec, Expectation
 from .logging_setup import get_logger
@@ -31,7 +32,7 @@ log = get_logger(__name__)
 @dataclass
 class RejectedRecord:
     entity: str
-    source_key: Optional[str]
+    source_key: str | None
     rule: str
     error_message: str
     payload: Mapping[str, Any]
@@ -43,8 +44,8 @@ class ExpectationResult:
     kind: str
     severity: str
     passed: bool
-    observed_value: Optional[float] = None
-    threshold_value: Optional[float] = None
+    observed_value: float | None = None
+    threshold_value: float | None = None
     details: str = ""
 
     @property
@@ -56,7 +57,7 @@ class ExpectationResult:
 # Row level
 # ---------------------------------------------------------------------
 def validate_record(spec: EntitySpec, mapped: Mapping[str, Any],
-                    raw: Mapping[str, Any]) -> Optional[RejectedRecord]:
+                    raw: Mapping[str, Any]) -> RejectedRecord | None:
     """Return a rejection if the mapped record cannot be safely landed."""
     pk_value = mapped.get(spec.primary_key)
     if pk_value is None:
@@ -90,7 +91,7 @@ def validate_record(spec: EntitySpec, mapped: Mapping[str, Any],
 # ---------------------------------------------------------------------
 # Batch level
 # ---------------------------------------------------------------------
-def _numeric(value: Any) -> Optional[float]:
+def _numeric(value: Any) -> float | None:
     if value is None:
         return None
     if isinstance(value, (int, float, Decimal)):
@@ -121,7 +122,8 @@ def _check_unique(rows: Sequence[Mapping[str, Any]], columns: Iterable[str]) -> 
     return duplicates, "duplicate counts: " + ", ".join(detail) if detail else ""
 
 
-def _check_non_negative(rows: Sequence[Mapping[str, Any]], columns: Iterable[str]) -> tuple[int, str]:
+def _check_non_negative(
+        rows: Sequence[Mapping[str, Any]], columns: Iterable[str]) -> tuple[int, str]:
     failures = 0
     detail: list[str] = []
     for column in columns:
@@ -134,7 +136,7 @@ def _check_non_negative(rows: Sequence[Mapping[str, Any]], columns: Iterable[str
 
 
 def _check_range(rows: Sequence[Mapping[str, Any]], columns: Iterable[str],
-                 low: Optional[float], high: Optional[float]) -> tuple[int, str]:
+                 low: float | None, high: float | None) -> tuple[int, str]:
     failures = 0
     detail: list[str] = []
     for column in columns:

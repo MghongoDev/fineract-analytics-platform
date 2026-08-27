@@ -14,7 +14,8 @@ actually observed the change, before any transformation starts.
 
 from __future__ import annotations
 
-from typing import Any, Optional, Sequence
+from collections.abc import Sequence
+from typing import Any
 
 from airflow.exceptions import AirflowFailException
 from airflow.sensors.base import BaseSensorOperator
@@ -108,7 +109,7 @@ class CDCCaughtUpSensor(BaseSensorOperator):
         "savings_products": ("oltp.savings_products", "savings_products"),
     }
 
-    def __init__(self, entities: Optional[Sequence[str]] = None,
+    def __init__(self, entities: Sequence[str] | None = None,
                  row_tolerance: int = 0,
                  max_lag_seconds: int = 300,
                  **kwargs: Any):

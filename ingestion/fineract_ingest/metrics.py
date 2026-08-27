@@ -18,7 +18,6 @@ The metric set is chosen to answer four operational questions:
 from __future__ import annotations
 
 import time
-from typing import Optional
 
 from prometheus_client import (
     CollectorRegistry,
@@ -109,7 +108,7 @@ class IngestionMetrics:
                     rows_updated: int, rows_unchanged: int, rows_rejected: int,
                     duration_seconds: float, api_requests: int, api_retries: int,
                     mean_latency_seconds: float, status: str,
-                    table_rows: Optional[int] = None) -> None:
+                    table_rows: int | None = None) -> None:
         labels = self._labels(entity)
         self.rows_read.labels(**labels).inc(rows_read)
         self.rows_inserted.labels(**labels).inc(rows_inserted)

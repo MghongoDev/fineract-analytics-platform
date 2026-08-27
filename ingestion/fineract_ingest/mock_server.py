@@ -28,7 +28,7 @@ import random
 import re
 from datetime import date, timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from typing import Any, Optional
+from typing import Any
 from urllib.parse import parse_qs, urlparse
 
 OFFICE_NAMES = ["Head Office", "Nairobi CBD", "Kisumu", "Mombasa", "Nakuru", "Eldoret"]
@@ -63,7 +63,7 @@ class FineractDataset:
     """Seeded, in-memory dataset shaped exactly like the Fineract API."""
 
     def __init__(self, clients: int = 400, loans: int = 700, seed: int = 42,
-                 as_of: Optional[date] = None):
+                 as_of: date | None = None):
         self.random = random.Random(seed)
         self.as_of = as_of or date(2026, 8, 11)
         self.offices = self._build_offices()
@@ -120,8 +120,10 @@ class FineractDataset:
                 "minPrincipal": 10_000, "maxPrincipal": 500_000 * index,
                 "numberOfRepayments": self.random.choice([6, 9, 12, 18, 24]),
                 "repaymentEvery": 1,
-                "repaymentFrequencyType": {"id": 2, "code": "repaymentFrequency.periodFrequencyType.months",
-                                           "value": "Months"},
+                "repaymentFrequencyType": {
+                    "id": 2,
+                    "code": "repaymentFrequency.periodFrequencyType.months",
+                    "value": "Months"},
                 "interestRatePerPeriod": rate,
                 "interestRateFrequencyType": {"id": 2, "value": "Per month"},
                 "annualInterestRate": round(rate * 12, 2),
@@ -144,7 +146,8 @@ class FineractDataset:
             "interestPostingPeriodType": {"id": 4, "value": "Monthly"},
             "minRequiredOpeningBalance": 500,
             "status": "savingsProduct.active",
-        } for index, name in enumerate(["Akiba Savings", "Business Current", "Group Fund"], start=1)]
+        } for index, name in enumerate(
+            ["Akiba Savings", "Business Current", "Group Fund"], start=1)]
 
     # -- core ---------------------------------------------------------
     def _build_clients(self, count: int) -> list[dict]:
@@ -159,9 +162,11 @@ class FineractDataset:
             rows.append({
                 "id": index, "accountNo": f"{index:09d}",
                 "externalId": f"EXT-C-{index:06d}",
-                "status": {"id": 300 if active else 600,
-                           "code": "clientStatusType.active" if active else "clientStatusType.closed",
-                           "value": "Active" if active else "Closed"},
+                "status": {
+                    "id": 300 if active else 600,
+                    "code": ("clientStatusType.active" if active
+                             else "clientStatusType.closed"),
+                    "value": "Active" if active else "Closed"},
                 "subStatus": {"id": 0, "value": None},
                 "active": active,
                 "activationDate": _d(activation),
@@ -173,14 +178,17 @@ class FineractDataset:
                               "value": "PERSON" if index % 3 else "ENTITY"},
                 "gender": {"id": 1 if index % 2 else 2,
                            "value": "Female" if index % 2 else "Male"},
-                "clientType": {"id": 1, "value": self.random.choice(["Individual", "Group member"])},
+                "clientType": {
+                    "id": 1,
+                    "value": self.random.choice(["Individual", "Group member"])},
                 "clientClassification": {"id": 1, "value": self.random.choice(
                     ["Refugee entrepreneur", "Host community", "Youth", "Women-led"])},
                 "firstname": first, "lastname": last,
                 "displayName": f"{first} {last}",
                 "mobileNo": f"+2547{self.random.randint(10_000_000, 99_999_999)}",
                 "emailAddress": f"{first.lower()}.{last.lower()}{index}@example.org",
-                "dateOfBirth": _d(date(1970, 1, 1) + timedelta(days=self.random.randint(0, 11_000))),
+                "dateOfBirth": _d(
+                    date(1970, 1, 1) + timedelta(days=self.random.randint(0, 11_000))),
             })
         return rows
 
@@ -252,7 +260,8 @@ class FineractDataset:
                     "principalPaid": principal_paid,
                     "principalWrittenOff": written_off,
                     "principalOutstanding": principal_outstanding,
-                    "principalOverdue": round(principal_outstanding * 0.35, 2) if overdue_days else 0,
+                    "principalOverdue": (
+                        round(principal_outstanding * 0.35, 2) if overdue_days else 0),
                     "interestCharged": interest_charged,
                     "interestPaid": interest_paid,
                     "interestWaived": 0,
@@ -335,7 +344,9 @@ class FineractDataset:
             installments = max(1, int(loan["numberOfRepayments"] * loan["_progress"]))
             balance = float(loan["principal"])
             per_principal = float(loan["principal"]) / max(1, loan["numberOfRepayments"])
-            per_interest = float(loan["summary"]["interestCharged"]) / max(1, loan["numberOfRepayments"])
+            per_interest = (
+                float(loan["summary"]["interestCharged"])
+                / max(1, loan["numberOfRepayments"]))
             for n in range(1, installments + 1):
                 balance = max(0.0, balance - per_principal)
                 rows.append({

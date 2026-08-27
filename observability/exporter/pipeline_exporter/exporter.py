@@ -238,7 +238,9 @@ class PipelineExporter:
         for sample_key, samples in results.items():
             gauge = self._gauges.get((collector_name, sample_key))
             if gauge is None:
-                log.warning("unmapped_metric", extra={"collector": collector_name, "key": sample_key})
+                log.warning(
+                    "unmapped_metric",
+                    extra={"collector": collector_name, "key": sample_key})
                 continue
             gauge.clear()  # drop stale label sets before repopulating
             for sample in samples:
