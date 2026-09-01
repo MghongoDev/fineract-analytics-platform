@@ -18,7 +18,7 @@ PYTHON        ?= python3
 
 # ---- connection defaults (override via .env or the environment) ------
 POSTGRES_HOST     ?= localhost
-POSTGRES_PORT     ?= 5432
+POSTGRES_PORT     ?= 5433
 POSTGRES_DB       ?= fineract_oltp
 POSTGRES_USER     ?= postgres
 POSTGRES_PASSWORD ?= postgres
