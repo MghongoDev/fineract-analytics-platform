@@ -39,8 +39,11 @@
       Background pools. Kafka engine consumers and ReplacingMergeTree
       merges compete for these: starve the merge pool and duplicate
       versions accumulate faster than they collapse.
+
+      Increased to 16 to satisfy ClickHouse's mutation pool requirements
+      (number_of_free_entries_in_pool_to_execute_mutation default is 20).
     -->
-    <background_pool_size>8</background_pool_size>
+    <background_pool_size>16</background_pool_size>
     <background_schedule_pool_size>8</background_schedule_pool_size>
     <background_message_broker_schedule_pool_size>8</background_message_broker_schedule_pool_size>
 
