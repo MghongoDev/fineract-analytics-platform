@@ -215,15 +215,17 @@ COVER = """
   <div class="subtitle">Design Report &mdash; an end-to-end, CDC-driven
   analytics engineering pipeline from the Apache&nbsp;Fineract REST API to
   analytics-ready marts and point-in-time-correct ML features.</div>
-  <div class="pipeline">Fineract API  &#8594;  PostgreSQL (OLTP)  &#8594;  Debezium / Kafka (CDC)  &#8594;  ClickHouse
+  <div class="pipeline">Fineract API  &#8594;  PostgreSQL (OLTP)  &#8594;  \
+Debezium / Kafka (CDC)  &#8594;  ClickHouse
                                                       &#8595;
        Airflow orchestrates  &#8594;  dbt: staging  &#8594;  intermediate  &#8594;  marts / ml
                                                       &#8595;
                                     BI  &middot;  ML training  &middot;  Grafana</div>
   <div class="meta">
-    <b>Stack</b>&nbsp; Python 3.11 &middot; PostgreSQL 16 &middot; Debezium 2.7 &middot;
-    Kafka 3.7 (KRaft) &middot; ClickHouse 24.8 &middot; dbt 1.8 &middot;
-    Airflow 2.10 &middot; Prometheus &middot; Grafana &middot; Docker Compose &middot; GitHub Actions<br/>
+    <b>Stack</b>&nbsp; Python 3.11 &middot; PostgreSQL 16 &middot; Debezium 2.7 \
+&middot; Kafka 3.7 (KRaft) &middot; ClickHouse 24.8 &middot; dbt 1.8 &middot;
+    Airflow 2.10 &middot; Prometheus &middot; Grafana &middot; Docker Compose \
+&middot; GitHub Actions<br/>
     <b>Verified</b>&nbsp; 22 dbt models built on a real ClickHouse engine &middot;
     133 tests passing &middot; 5,510 rows ingested, 0 writes on re-run<br/>
     <b>Generated</b>&nbsp; {generated}
