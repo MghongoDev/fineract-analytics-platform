@@ -88,9 +88,13 @@ make clean                          # stop and delete all volumes
 | Pushgateway | http://localhost:9091 | — |
 | Kafka UI (`tools` profile) | http://localhost:8091 | — |
 | Fineract (`fineract` profile) | https://localhost:8443/fineract-provider | `mifos` / `password`, tenant `default` |
-| PostgreSQL | `localhost:5432` | `postgres` / `postgres`, db `fineract_oltp` |
+| PostgreSQL | `localhost:5433` | `postgres` / `postgres`, db `fineract_oltp` |
 
 `make urls` prints this list from the running stack.
+
+> **Note:** PostgreSQL uses port **5433** instead of the default 5432 to avoid
+> conflicts with existing PostgreSQL installations on the host machine. If you
+> need to use a different port, change `POSTGRES_PORT` in `.env`.
 
 ---
 
@@ -278,7 +282,7 @@ changing:
 | ClickHouse tables empty | Connector never registered | `make cdc-register`, then `make cdc-status` |
 | Replication slot lag growing | ClickHouse or Connect is down | [`RUNBOOK.md` §Incident 1](docs/RUNBOOK.md) |
 | dbt cannot connect | ClickHouse still starting | `docker compose ps clickhouse` |
-| Port already in use | Something else on 8085/3000/5432 | Override the port in `.env` |
+| Port already in use | Something else on 8085/3000/5433 | Override the port in `.env` |
 
 Full alert-by-alert procedures are in [`docs/RUNBOOK.md`](docs/RUNBOOK.md).
 

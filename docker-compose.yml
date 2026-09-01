@@ -166,7 +166,7 @@ services:
       # Files here run once, in lexical order, on first boot.
       - ./platform/postgres/init:/docker-entrypoint-initdb.d:ro
     ports:
-      - "${POSTGRES_PORT:-5432}:5432"
+      - "${POSTGRES_PORT:-5433}:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_SUPERUSER:-postgres} -d ${POSTGRES_DB:-fineract_oltp}"]
       interval: 10s
@@ -210,7 +210,7 @@ services:
     volumes:
       - kafka-data:/var/lib/kafka/data
     healthcheck:
-      test: ["CMD-SHELL", "kafka-broker-api-versions --bootstrap-server localhost:29092 >/dev/null 2>&1 || exit 1"]
+      test: ["CMD-SHELL", "kafka-metadata --bootstrap-server kafka:29092 --list 2>&1 | grep -q 'ClusterId' || kafka-broker-api-versions --bootstrap-server kafka:29092 2>&1 | grep -q 'kafka:29092'"]
       interval: 15s
       timeout: 10s
       retries: 20
@@ -247,9 +247,9 @@ services:
       DEBEZIUM_PASSWORD: ${DEBEZIUM_PASSWORD:-debezium}
       CONNECT_CONFIG_PROVIDERS: env
       CONNECT_CONFIG_PROVIDERS_ENV_CLASS: org.apache.kafka.common.config.provider.EnvVarConfigProvider
-      # JMX -> Prometheus, so connector throughput and task state are
-      # visible next to everything else rather than only in Connect logs.
-      KAFKA_OPTS: "-javaagent:/kafka/jmx_prometheus_javaagent.jar=9404:/kafka/etc/jmx-exporter.yml"
+      # JMX -> Prometheus disabled temporarily due to missing javaagent JAR
+      # TODO: Download and mount jmx_prometheus_javaagent.jar to enable metrics
+      # KAFKA_OPTS: "-javaagent:/kafka/jmx_prometheus_javaagent.jar=9404:/kafka/etc/jmx-exporter.yml"
       JMXHOST: localhost
       JMXPORT: 1976
     ports:
@@ -320,7 +320,7 @@ services:
     volumes:
       - clickhouse-data:/var/lib/clickhouse
       - ./platform/clickhouse/config:/etc/clickhouse-server/config.d:ro
-      - ./platform/clickhouse/users:/etc/clickhouse-server/users.d:ro
+      - ./platform/clickhouse/users:/etc/clickhouse-server/users.d
       # Runs once on first boot, in lexical order. Order matters: the
       # Kafka engine tables must exist before the MVs that read them.
       - ./platform/clickhouse/init:/docker-entrypoint-initdb.d:ro

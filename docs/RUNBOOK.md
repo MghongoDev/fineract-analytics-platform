@@ -59,7 +59,7 @@ your current `.env`.
 |---|---|---|---|
 | Fineract API (self-hosted) | `https://localhost:8443/fineract-provider/api/v1` | `mifos` / `password` | self-signed cert; `curl -k` |
 | Fineract mock | `http://localhost:8090/fineract-provider/api/v1` | none | profile `mock` only |
-| Postgres (OLTP) | `postgresql://localhost:5432/fineract_oltp` | superuser `postgres` / `postgres`; app role `app_ingest` / `app_ingest` | see `.env` |
+| Postgres (OLTP) | `postgresql://localhost:5433/fineract_oltp` | superuser `postgres` / `postgres`; app role `app_ingest` / `app_ingest` | see `.env` |
 | Kafka (external listener) | `localhost:9092` | none | broker only, no UI |
 | Kafka UI | `http://localhost:8091` | none | profile `tools` |
 | Kafka Connect REST API | `http://localhost:8083/connectors` | none | Debezium connector lives here |
@@ -85,7 +85,7 @@ Work top to bottom; each stage's check assumes the previous one passed.
 ```bash
 make psql
 # or directly:
-PGPASSWORD=postgres psql -h localhost -p 5432 -U postgres -d fineract_oltp
+PGPASSWORD=postgres psql -h localhost -p 5433 -U postgres -d fineract_oltp
 
 -- row counts and last watermark per entity
 SELECT * FROM meta.v_latest_ingestion_run ORDER BY entity;
@@ -106,7 +106,7 @@ SELECT loan_id, status_value, principal, disbursed_on_date, _updated_at
 ```bash
 make cdc-lag
 # equivalent:
-PGPASSWORD=postgres psql -h localhost -p 5432 -U postgres -d fineract_oltp -c \
+PGPASSWORD=postgres psql -h localhost -p 5433 -U postgres -d fineract_oltp -c \
   "SELECT slot_name, active, pg_size_pretty(pg_wal_lsn_diff(pg_current_wal_lsn(), confirmed_flush_lsn)) AS lag_bytes
      FROM pg_replication_slots;"
 ```
@@ -177,7 +177,7 @@ curl -s "http://localhost:8123/?user=analytics&password=analytics" \
 
 ```bash
 # Postgres side
-PGPASSWORD=postgres psql -h localhost -p 5432 -U postgres -d fineract_oltp -c \
+PGPASSWORD=postgres psql -h localhost -p 5433 -U postgres -d fineract_oltp -c \
   "SELECT 'loans', count(*) FROM oltp.loans
    UNION ALL SELECT 'clients', count(*) FROM oltp.clients
    UNION ALL SELECT 'loan_transactions', count(*) FROM oltp.loan_transactions;"
@@ -245,7 +245,7 @@ curl -fsS -u admin:admin \
   "http://localhost:8085/api/v1/dags/fineract_analytics_pipeline/dagRuns/~/taskInstances?limit=20&order_by=-start_date"
 
 # Postgres: last run's error
-PGPASSWORD=postgres psql -h localhost -p 5432 -U postgres -d fineract_oltp -c \
+PGPASSWORD=postgres psql -h localhost -p 5433 -U postgres -d fineract_oltp -c \
   "SELECT run_id, status, error_message FROM meta.ingestion_run
      WHERE entity = '<entity>' ORDER BY started_at DESC LIMIT 3;"
 
