@@ -42,7 +42,7 @@ models:
           - relationships:
               to: ref('dim_office')
               field: office_id
-              config: { severity: warn }
+              config: {severity: warn}
 
   - name: dim_office
     description: Branch dimension with portfolio and staffing context attached.
@@ -84,14 +84,14 @@ models:
           - relationships:
               to: ref('dim_client')
               field: client_id
-              config: { severity: warn }
+              config: {severity: warn}
       - name: product_id
         description: Loan product.
         data_tests:
           - relationships:
               to: ref('dim_loan_product')
               field: product_id
-              config: { severity: warn }
+              config: {severity: warn}
       - name: total_outstanding
         description: Principal plus interest still owed.
         data_tests: [not_null]
