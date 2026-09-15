@@ -31,7 +31,7 @@ rules:
   # thing to a single "is CDC healthy" number: it is the gap between the
   # source commit and the connector reading it.
   # -------------------------------------------------------------------
-  - pattern: 'debezium.postgres<type=connector-metrics, context=(.+), server=(.+), key=(.+)><>(MilliSecondsBehindSource|MilliSecondsSinceLastEvent|TotalNumberOfEventsSeen|NumberOfCommittedTransactions|QueueTotalCapacity|QueueRemainingCapacity|SnapshotCompleted|SnapshotRunning|NumberOfDisconnects)'
+  - pattern: 'debezium.postgres<type=connector-metrics, context=(.+), server=(.+), key=(.+)><>(MilliSecondsBehindSource|MilliSecondsSinceLastEvent|TotalNumberOfEventsSeen|NumberOfCommittedTransactions|QueueTotalCapacity|QueueRemainingCapacity|SnapshotCompleted|SnapshotRunning|NumberOfDisconnects)'  # yamllint disable-line rule:line-length
     name: debezium_metrics_$4
     labels:
       context: "$1"
@@ -39,7 +39,7 @@ rules:
       key: "$3"
     type: GAUGE
 
-  - pattern: 'debezium.postgres<type=connector-metrics, context=(.+), server=(.+)><>(MilliSecondsBehindSource|MilliSecondsSinceLastEvent|TotalNumberOfEventsSeen|NumberOfCommittedTransactions|QueueTotalCapacity|QueueRemainingCapacity|Connected|SnapshotCompleted|SnapshotRunning)'
+  - pattern: 'debezium.postgres<type=connector-metrics, context=(.+), server=(.+)><>(MilliSecondsBehindSource|MilliSecondsSinceLastEvent|TotalNumberOfEventsSeen|NumberOfCommittedTransactions|QueueTotalCapacity|QueueRemainingCapacity|Connected|SnapshotCompleted|SnapshotRunning)'  # yamllint disable-line rule:line-length
     name: debezium_metrics_$3
     labels:
       context: "$1"
