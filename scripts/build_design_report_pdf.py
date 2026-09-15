@@ -258,19 +258,16 @@ def strip_leading_title(text: str) -> str:
     """Drop the source document's own H1/subtitle block - the PDF has a
     cover page, and repeating the title immediately after it looks like
     a mistake."""
-    return re.sub(
-        r"\A#\s+Design Report\s*\n+###[^\n]*\n+---\s*\n",
-        "", text, count=1)
+    return re.sub(r"\A#\s+Design Report\s*\n+###[^\n]*\n+---\s*\n", "", text, count=1)
 
 
 def build_html(markdown_text: str) -> str:
     body = markdown.markdown(
         strip_leading_title(markdown_text),
-        extensions=["tables", "fenced_code", "codehilite", "sane_lists",
-                    "attr_list", "md_in_html"],
-        extension_configs={"codehilite": {"noclasses": True,
-                                          "pygments_style": "friendly",
-                                          "guess_lang": False}},
+        extensions=["tables", "fenced_code", "codehilite", "sane_lists", "attr_list", "md_in_html"],
+        extension_configs={
+            "codehilite": {"noclasses": True, "pygments_style": "friendly", "guess_lang": False}
+        },
     )
     cover = COVER.format(generated=date.today().strftime("%d %B %Y"))
     return (
@@ -294,18 +291,15 @@ async def render(html_path: Path, pdf_path: Path) -> None:
             display_header_footer=True,
             header_template=HEADER,
             footer_template=FOOTER,
-            margin={"top": "16mm", "bottom": "18mm",
-                    "left": "16mm", "right": "16mm"},
+            margin={"top": "16mm", "bottom": "18mm", "left": "16mm", "right": "16mm"},
         )
         await browser.close()
 
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--input", type=Path,
-                        default=REPO_ROOT / "docs" / "DESIGN_REPORT.md")
-    parser.add_argument("--output", type=Path,
-                        default=REPO_ROOT / "docs" / "DESIGN_REPORT.pdf")
+    parser.add_argument("--input", type=Path, default=REPO_ROOT / "docs" / "DESIGN_REPORT.md")
+    parser.add_argument("--output", type=Path, default=REPO_ROOT / "docs" / "DESIGN_REPORT.pdf")
     args = parser.parse_args()
 
     html = build_html(args.input.read_text())
