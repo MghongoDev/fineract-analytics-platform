@@ -59,7 +59,10 @@ mappings:
     match_metric_type: counter
 
   # airflow.task_instance_created-<operator_class> - fan-out per operator.
-  - match: "airflow.task_instance_created-*"
+  # The match glob only allows `*` as a whole dot-separated segment (a `-*`
+  # suffix inside a segment is invalid), so use `.*` - it still captures the
+  # operator class in $1 because the FSM runs per dot-segment.
+  - match: "airflow.task_instance_created.*"
     name: "airflow_task_instance_created_total"
     match_metric_type: counter
     labels:
