@@ -38,7 +38,7 @@ def postgres_available() -> bool:
     host = os.environ.get("POSTGRES_HOST", "")
     if not host:
         return False
-    if host.startswith("/"):        # unix socket directory
+    if host.startswith("/"):  # unix socket directory
         return True
     return _port_open(host, int(os.environ.get("POSTGRES_PORT", "5432")))
 

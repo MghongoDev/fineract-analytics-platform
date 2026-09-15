@@ -121,8 +121,7 @@ class TestMapAndValidate:
         if rejects:
             assert rejects[0].rule in {"mapper_exception", "record_not_empty"}
 
-    def test_duplicate_keys_within_a_batch_are_collapsed_last_write_wins(
-            self, pipeline, dataset):
+    def test_duplicate_keys_within_a_batch_are_collapsed_last_write_wins(self, pipeline, dataset):
         """The API can page the same record twice when rows are being
         written concurrently. Two rows with the same key in one INSERT
         makes ON CONFLICT fail outright, so the batch must be unique."""
@@ -145,8 +144,9 @@ class TestMapAndValidate:
         original = dataset.loans[0]
         changed = dict(original)
         changed["summary"] = dict(original["summary"])
-        changed["summary"]["totalOutstanding"] = float(
-            original["summary"]["totalOutstanding"]) + 0.01
+        changed["summary"]["totalOutstanding"] = (
+            float(original["summary"]["totalOutstanding"]) + 0.01
+        )
 
         before, _ = pipeline._map_and_validate(spec, [original])
         after, _ = pipeline._map_and_validate(spec, [changed])
@@ -173,4 +173,5 @@ class TestMoneyHandling:
                 if row[column] is not None:
                     assert isinstance(row[column], Decimal), (
                         f"{column} is {type(row[column])}, not Decimal - "
-                        "money must never become a float")
+                        "money must never become a float"
+                    )
