@@ -14,7 +14,7 @@
 # for at all.
 dbt-core==1.8.8
 dbt-clickhouse==1.8.9
-clickhouse-connect==0.8.9
+clickhouse-connect==1.8.0
 psycopg[binary]==3.1.19
 requests==2.32.3
 prometheus-client==0.20.0
