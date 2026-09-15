@@ -231,16 +231,15 @@ class PipelineExporter:
                 self._collector_errors.labels(collector=collector.name).inc()
                 log.exception("collector_failed", extra={"collector": collector.name})
             finally:
-                self._scrape_duration.labels(collector=collector.name).set(
-                    time.monotonic() - start)
+                self._scrape_duration.labels(collector=collector.name).set(time.monotonic() - start)
 
     def _apply(self, collector_name: str, results: dict[str, list[MetricSample]]) -> None:
         for sample_key, samples in results.items():
             gauge = self._gauges.get((collector_name, sample_key))
             if gauge is None:
                 log.warning(
-                    "unmapped_metric",
-                    extra={"collector": collector_name, "key": sample_key})
+                    "unmapped_metric", extra={"collector": collector_name, "key": sample_key}
+                )
                 continue
             gauge.clear()  # drop stale label sets before repopulating
             for sample in samples:
