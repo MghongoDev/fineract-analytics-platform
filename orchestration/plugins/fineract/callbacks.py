@@ -23,8 +23,7 @@ def _push(metric: str, value: float, labels: dict[str, str]) -> None:
         from prometheus_client import CollectorRegistry, Gauge, push_to_gateway
 
         registry = CollectorRegistry()
-        gauge = Gauge(metric, f"Airflow event: {metric}",
-                      list(labels.keys()), registry=registry)
+        gauge = Gauge(metric, f"Airflow event: {metric}", list(labels.keys()), registry=registry)
         gauge.labels(**labels).set(value)
         push_to_gateway(PUSHGATEWAY_URL, job="airflow_events", registry=registry)
     except Exception:  # noqa: BLE001 - deliberately swallowed
@@ -37,9 +36,11 @@ def task_failure_callback(context: Context) -> None:
     task_id = getattr(task_instance, "task_id", "unknown")
     exception = context.get("exception")
 
-    print(f"[ALERT] task failed dag={dag_id} task={task_id} "
-          f"run={context.get('run_id')} try={getattr(task_instance, 'try_number', '?')} "
-          f"error={exception}")
+    print(
+        f"[ALERT] task failed dag={dag_id} task={task_id} "
+        f"run={context.get('run_id')} try={getattr(task_instance, 'try_number', '?')} "
+        f"error={exception}"
+    )
 
     _push("airflow_task_failed", 1, {"dag_id": dag_id, "task_id": task_id})
 
@@ -52,13 +53,16 @@ def dag_failure_callback(context: Context) -> None:
 
 def dag_success_callback(context: Context) -> None:
     dag_id = context["dag"].dag_id
-    _push("airflow_dag_last_success_timestamp_seconds",
-          context["dag_run"].end_date.timestamp() if context["dag_run"].end_date else 0,
-          {"dag_id": dag_id})
+    _push(
+        "airflow_dag_last_success_timestamp_seconds",
+        context["dag_run"].end_date.timestamp() if context["dag_run"].end_date else 0,
+        {"dag_id": dag_id},
+    )
 
 
-def sla_miss_callback(dag: Any, task_list: str, blocking_task_list: str,
-                      slas: Any, blocking_tis: Any) -> None:
+def sla_miss_callback(
+    dag: Any, task_list: str, blocking_task_list: str, slas: Any, blocking_tis: Any
+) -> None:
     """An SLA miss is a freshness problem, so it is reported as one."""
     print(f"[ALERT] SLA missed dag={dag.dag_id} tasks={task_list}")
     _push("airflow_sla_missed", 1, {"dag_id": dag.dag_id})

@@ -53,7 +53,7 @@ with DAG(
     dag_id="fineract_backfill",
     description="Manual re-ingestion and full dbt rebuild",
     default_args=default_args,
-    schedule=None,                    # manual trigger only, by design
+    schedule=None,  # manual trigger only, by design
     start_date=datetime(2026, 1, 1),
     catchup=False,
     max_active_runs=1,
@@ -62,26 +62,30 @@ with DAG(
     doc_md=__doc__,
     params={
         "reingest_source": Param(
-            False, type="boolean",
-            description="Re-read the Fineract API into Postgres. Puts load on "
-                        "the source system."),
+            False,
+            type="boolean",
+            description="Re-read the Fineract API into Postgres. Puts load on the source system.",
+        ),
         "entities": Param(
-            "all", type="string",
-            description="Comma-separated entity names, or 'all'."),
+            "all", type="string", description="Comma-separated entity names, or 'all'."
+        ),
         "rebuild_models": Param(
-            True, type="boolean",
-            description="dbt build --full-refresh over the selected models."),
+            True, type="boolean", description="dbt build --full-refresh over the selected models."
+        ),
         "dbt_select": Param(
-            "", type="string",
+            "",
+            type="string",
             description="dbt selector, e.g. 'tag:marts' or "
-                        "'stg_fineract__loans+'. Empty means everything."),
+            "'stg_fineract__loans+'. Empty means everything.",
+        ),
         "confirm": Param(
-            "", type="string",
+            "",
+            type="string",
             description="Type REBUILD to confirm. A guard against an "
-                        "accidental trigger from the UI."),
+            "accidental trigger from the UI.",
+        ),
     },
 ) as dag:
-
     start = EmptyOperator(task_id="start")
 
     @task(task_id="validate_parameters")
@@ -91,7 +95,8 @@ with DAG(
             raise ValueError(
                 "Refusing to run: set the 'confirm' parameter to REBUILD. "
                 "This DAG rebuilds warehouse relations and can re-read the "
-                "whole source book.")
+                "whole source book."
+            )
         return {
             "reingest": bool(params.get("reingest_source")),
             "entities": params.get("entities", "all"),
@@ -104,10 +109,17 @@ with DAG(
         """Record row counts before the rebuild so the after-check can
         prove the backfill did not lose anything."""
         postgres = PostgresHook()
-        tables = ["clients", "loans", "loan_transactions", "savings_accounts",
-                  "offices", "staff", "loan_products", "savings_products"]
-        counts = {t: int(postgres.scalar(f"SELECT count(*) FROM oltp.{t}") or 0)
-                  for t in tables}
+        tables = [
+            "clients",
+            "loans",
+            "loan_transactions",
+            "savings_accounts",
+            "offices",
+            "staff",
+            "loan_products",
+            "savings_products",
+        ]
+        counts = {t: int(postgres.scalar(f"SELECT count(*) FROM oltp.{t}") or 0) for t in tables}
         print(f"row counts before: {counts}")
         return counts
 
@@ -148,14 +160,16 @@ with DAG(
     def verify_after(before: dict) -> dict:
         """A backfill that silently loses rows is worse than no backfill."""
         postgres = PostgresHook()
-        after = {t: int(postgres.scalar(f"SELECT count(*) FROM oltp.{t}") or 0)
-                 for t in before}
+        after = {t: int(postgres.scalar(f"SELECT count(*) FROM oltp.{t}") or 0) for t in before}
         shrunk = {t: (before[t], after[t]) for t in before if after[t] < before[t]}
         print(f"row counts after: {after}")
         if shrunk:
             raise RuntimeError(f"row counts decreased during backfill: {shrunk}")
-        return {"before": before, "after": after,
-                "delta": {t: after[t] - before[t] for t in before}}
+        return {
+            "before": before,
+            "after": after,
+            "delta": {t: after[t] - before[t] for t in before},
+        }
 
     finish = EmptyOperator(task_id="finish")
 

@@ -30,9 +30,15 @@ class ClickHouseHook:
     overhead is irrelevant.
     """
 
-    def __init__(self, host: str | None = None, port: int | None = None,
-                 user: str | None = None, password: str | None = None,
-                 database: str = "default", timeout: int = 120):
+    def __init__(
+        self,
+        host: str | None = None,
+        port: int | None = None,
+        user: str | None = None,
+        password: str | None = None,
+        database: str = "default",
+        timeout: int = 120,
+    ):
         self.host = host or _env("CLICKHOUSE_HOST", "clickhouse")
         self.port = port or int(_env("CLICKHOUSE_HTTP_PORT", "8123"))
         self.user = user or _env("CLICKHOUSE_USER", "analytics")
@@ -54,8 +60,8 @@ class ClickHouseHook:
         )
         if response.status_code != 200:
             raise RuntimeError(
-                f"ClickHouse query failed ({response.status_code}): "
-                f"{response.text[:1000]}")
+                f"ClickHouse query failed ({response.status_code}): {response.text[:1000]}"
+            )
         return response.text
 
     def query_json(self, query: str) -> list[dict[str, Any]]:
@@ -114,8 +120,7 @@ class KafkaConnectHook:
         self.timeout = timeout
 
     def connector_status(self, name: str) -> dict:
-        response = requests.get(f"{self.url}/connectors/{name}/status",
-                                timeout=self.timeout)
+        response = requests.get(f"{self.url}/connectors/{name}/status", timeout=self.timeout)
         response.raise_for_status()
         return response.json()
 
@@ -143,8 +148,9 @@ class KafkaConnectHook:
         for task in status.get("tasks", []):
             if task.get("state") == "FAILED":
                 task_id = task["id"]
-                requests.post(f"{self.url}/connectors/{name}/tasks/{task_id}/restart",
-                              timeout=self.timeout)
+                requests.post(
+                    f"{self.url}/connectors/{name}/tasks/{task_id}/restart", timeout=self.timeout
+                )
                 restarted.append(task_id)
         return restarted
 
@@ -153,8 +159,7 @@ class FineractHook:
     """Reachability probe for the source API."""
 
     def __init__(self) -> None:
-        self.base_url = _env(
-            "FINERACT_BASE_URL", "https://fineract:8443/fineract-provider/api/v1")
+        self.base_url = _env("FINERACT_BASE_URL", "https://fineract:8443/fineract-provider/api/v1")
         self.tenant = _env("FINERACT_TENANT_ID", "default")
         self.username = _env("FINERACT_USERNAME", "mifos")
         self.password = _env("FINERACT_PASSWORD", "password")
