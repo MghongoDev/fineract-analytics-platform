@@ -3,10 +3,19 @@
 # Airflow itself is NOT listed: it comes from the base image, and pinning
 # it here is the classic way to end up with two Airflow versions fighting
 # over the same metadata database.
-dbt-core>=1.8,<2.0
-dbt-clickhouse>=1.8,<2.0
-clickhouse-connect>=0.7,<1.0
-psycopg[binary]>=3.1,<4
-requests>=2.31,<3
-prometheus-client>=0.20,<1
-apache-airflow-providers-postgres>=5.11
+#
+# Every pin here is exact ON PURPOSE. The apache/airflow:2.10.5-python3.11
+# base image ships protobuf 4.25.x and opentelemetry-proto 1.27.0 (both
+# want protobuf < 5). dbt-core 1.8.9 moved to protobuf>=5, so leaving
+# dbt-core as a `>=1.8,<2.0` range sends pip backtracking across
+# dbt-adapters and opentelemetry-proto for minutes before it gives up.
+# dbt-core is pinned to the newest 1.8.x that still accepts protobuf < 5;
+# the other pins mirror the base image exactly so pip has nothing to hunt
+# for at all.
+dbt-core==1.8.8
+dbt-clickhouse==1.8.9
+clickhouse-connect==0.8.9
+psycopg[binary]==3.1.19
+requests==2.32.3
+prometheus-client==0.20.0
+apache-airflow-providers-postgres==6.0.0
