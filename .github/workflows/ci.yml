@@ -54,9 +54,7 @@ jobs:
           ruff format --check $targets
 
       - name: yamllint all YAML
-        run: |
-          yamllint -d "{extends: default, rules: {line-length: {max: 140}, document-start: disable, truthy: {allowed-values: ['true','false','on','off']}}}" \
-            $(git ls-files '*.yml' '*.yaml')
+        run: yamllint $(git ls-files '*.yml' '*.yaml')
 
       - name: shellcheck (cdc/scripts and scripts/*.sh)
         run: |
@@ -479,6 +477,14 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
+
+      # docker-compose.yml uses `env_file: .env`, which is gitignored, so a
+      # fresh checkout has no .env and `compose config` would abort.
+      # .env.example carries the real keys with dev defaults, so seeding
+      # .env from it keeps `config -q` honest about interpolation.
+      - name: Seed .env from .env.example
+        run: |
+          if [ ! -f .env ] && [ -f .env.example ]; then cp .env.example .env; fi
 
       - name: docker compose config -q
         run: |

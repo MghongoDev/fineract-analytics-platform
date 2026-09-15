@@ -247,7 +247,8 @@ jobs:
             echo "Attempted SHA: \`${{ needs.verify-ci.outputs.sha }}\`"
             echo
             echo "1. Re-run this workflow via workflow_dispatch pinned to the last known-good tag."
-            echo "2. If dbt models were partially built, re-run \`dbt build --target prod --select state:modified+ --defer --state ./prod-manifest\`"
+            echo "2. If dbt models were partially built, re-run \`dbt build --target prod --select"
+            echo "   state:modified+ --defer --state ./prod-manifest\`"
             echo "   from the last-known-good manifest artifact (\`prod-manifest-<sha>\`) to converge the warehouse."
             echo "3. Image tags are immutable and additive - the previous version's image is still in ghcr.io and can be"
             echo "   redeployed directly without a rebuild."
