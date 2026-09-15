@@ -101,7 +101,9 @@ bootstrap: up-core ## Wait for health, apply ClickHouse init SQL, register CDC c
 	@echo "[bootstrap] applying ClickHouse init SQL"
 	@for f in platform/clickhouse/init/*.sql; do \
 		echo "  -> $$f"; \
-		curl -fsS "http://$(CLICKHOUSE_HOST):$(CLICKHOUSE_HTTP_PORT)/?user=$(CLICKHOUSE_USER)&password=$(CLICKHOUSE_PASSWORD)" --data-binary @$$f; \
+		$(COMPOSE) -f $(COMPOSE_FILE) exec -T clickhouse clickhouse-client \
+			--user $(CLICKHOUSE_USER) --password $(CLICKHOUSE_PASSWORD) \
+			< "$$f"; \
 	done
 	@$(MAKE) --no-print-directory cdc-register
 	@echo "[bootstrap] seeding via ingestion (mock server)"
@@ -113,13 +115,13 @@ bootstrap: up-core ## Wait for health, apply ClickHouse init SQL, register CDC c
 # ---------------------------------------------------------------------
 
 ingest: ## Run the real ingestion pipeline against the configured FINERACT_BASE_URL
-	$(COMPOSE) -f $(COMPOSE_FILE) run --rm ingestion python -m fineract_ingest ingest --all
+	$(COMPOSE) -f $(COMPOSE_FILE) run --rm ingestion ingest --all
 
 ingest-mock: ## Start the mock Fineract server and run ingestion against it (offline, deterministic)
 	$(COMPOSE) -f $(COMPOSE_FILE) up -d fineract-mock || true
 	$(COMPOSE) -f $(COMPOSE_FILE) run --rm \
 		-e FINERACT_BASE_URL=http://fineract-mock:8090/fineract-provider/api/v1 \
-		ingestion python -m fineract_ingest ingest --all
+		ingestion ingest --all
 
 # ---------------------------------------------------------------------
 # CDC / Debezium
@@ -200,7 +202,7 @@ metrics: ## Print current pipeline exporter metrics
 	@curl -fsS "http://$(EXPORTER_HOST):$(EXPORTER_PORT)/metrics"
 
 urls: ## Print every UI URL in the stack, with credentials
-	@echo "Fineract API      : https://$(FINERACT_HOST):$(FINERACT_PORT)/fineract-provider/api/v1  (user: mifos / password: password)"
+	@echo "Fineract API      : https://$(FINERACT_HOST):$(FINERACT_PORT)/fineract-provider/swagger-ui/index.html  (user: mifos / password: password; API base: /fineract-provider/api/v1)"
 	@echo "Postgres          : postgresql://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@$(POSTGRES_HOST):$(POSTGRES_PORT)/$(POSTGRES_DB)"
 	@echo "Kafka             : $(FINERACT_HOST):9092"
 	@echo "Kafka Connect API : $(KAFKA_CONNECT_URL)/connectors"
