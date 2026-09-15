@@ -21,20 +21,20 @@ models:
           due or was written off. The only forward-looking column.
         data_tests:
           - not_null
-          - accepted_values: { values: [0, 1] }
+          - accepted_values: {values: [0, 1]}
       - name: is_label_mature
         description: >
           0 for loans too young to have shown default behaviour. Filter on
           this before training or the model learns "new loans never
           default".
         data_tests:
-          - accepted_values: { values: [0, 1] }
+          - accepted_values: {values: [0, 1]}
       - name: split_hint
         description: >
           Time-based train/validation/test split. Random splitting leaks
           the future into training for a temporally ordered process.
         data_tests:
-          - accepted_values: { values: ['train', 'validation', 'test'] }
+          - accepted_values: {values: ['train', 'validation', 'test']}
       - name: feat_prior_write_off_rate
         description: Share of the borrower's earlier loans that were written off.
       - name: feat_is_first_time_borrower
@@ -56,4 +56,4 @@ models:
       - name: needs_collections_review
         description: 1 when the client has any loan in arrears today.
         data_tests:
-          - accepted_values: { values: [0, 1] }
+          - accepted_values: {values: [0, 1]}

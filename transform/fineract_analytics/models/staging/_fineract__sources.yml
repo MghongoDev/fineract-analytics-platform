@@ -15,8 +15,8 @@ sources:
     # the business data", not "how recently did we write something".
     loaded_at_field: _source_commit_at
     freshness:
-      warn_after: { count: 30, period: minute }
-      error_after: { count: 2, period: hour }
+      warn_after: {count: 30, period: minute}
+      error_after: {count: 2, period: hour}
 
     tables:
       - name: offices
@@ -55,8 +55,8 @@ sources:
         # Loans move constantly during business hours; a 30 minute gap is
         # already suspicious.
         freshness:
-          warn_after: { count: 15, period: minute }
-          error_after: { count: 1, period: hour }
+          warn_after: {count: 15, period: minute}
+          error_after: {count: 1, period: hour}
         columns:
           - name: loan_id
             data_tests: [not_null]
@@ -64,8 +64,8 @@ sources:
       - name: loan_transactions
         description: Repayment / disbursal ledger.
         freshness:
-          warn_after: { count: 15, period: minute }
-          error_after: { count: 1, period: hour }
+          warn_after: {count: 15, period: minute}
+          error_after: {count: 1, period: hour}
         columns:
           - name: transaction_id
             data_tests: [not_null]

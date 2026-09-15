@@ -16,7 +16,7 @@ models:
       - name: is_active
         description: 1 when the client is in Fineract status Active.
         data_tests:
-          - accepted_values: { values: [0, 1] }
+          - accepted_values: {values: [0, 1]}
       - name: office_id
         description: Owning branch.
       - name: tenure_days
@@ -89,7 +89,7 @@ models:
       - name: is_countable
         description: 0 for reversed transactions; every measure must respect this.
         data_tests:
-          - accepted_values: { values: [0, 1] }
+          - accepted_values: {values: [0, 1]}
 
   - name: stg_fineract__offices
     description: Branch hierarchy with depth derived from Fineract's materialised path.
