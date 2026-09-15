@@ -18,4 +18,4 @@ clickhouse-connect==0.8.9
 psycopg[binary]==3.1.19
 requests==2.32.3
 prometheus-client==0.20.0
-apache-airflow-providers-postgres==6.0.0
+apache-airflow-providers-postgres==7.0.2
