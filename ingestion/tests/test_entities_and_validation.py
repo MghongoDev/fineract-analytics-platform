@@ -110,8 +110,7 @@ class TestRecordValidation:
 
     def test_a_valid_record_is_accepted(self, dataset):
         spec = ENTITIES["clients"]
-        assert validate_record(spec, spec.mapper(dataset.clients[0]),
-                               dataset.clients[0]) is None
+        assert validate_record(spec, spec.mapper(dataset.clients[0]), dataset.clients[0]) is None
 
 
 class TestExpectations:

@@ -47,11 +47,21 @@ def mock_server():
 @pytest.fixture
 def client(mock_server):
     config = FineractConfig(
-        base_url=mock_server, tenant_id="default", username="mifos",
-        password="password", verify_ssl=False, page_size=50, max_pages=100,
-        connect_timeout=5, read_timeout=15, max_retries=3,
-        backoff_base_seconds=0.01, backoff_max_seconds=0.05,
-        requests_per_second=0, auth_mode="basic")
+        base_url=mock_server,
+        tenant_id="default",
+        username="mifos",
+        password="password",
+        verify_ssl=False,
+        page_size=50,
+        max_pages=100,
+        connect_timeout=5,
+        read_timeout=15,
+        max_retries=3,
+        backoff_base_seconds=0.01,
+        backoff_max_seconds=0.05,
+        requests_per_second=0,
+        auth_mode="basic",
+    )
     instance = FineractClient(config)
     yield instance
     instance.close()
@@ -65,20 +75,22 @@ class TestAuthentication:
 
     def test_missing_tenant_header_is_rejected_by_the_api(self, mock_server):
         import requests
-        response = requests.get(f"{mock_server}/offices",
-                                headers={"Authorization": "Basic x"}, timeout=10)
+
+        response = requests.get(
+            f"{mock_server}/offices", headers={"Authorization": "Basic x"}, timeout=10
+        )
         assert response.status_code == 400
 
     def test_missing_authorization_is_rejected(self, mock_server):
         import requests
+
         response = requests.get(
-            f"{mock_server}/offices",
-            headers={"Fineract-Platform-TenantId": "default"}, timeout=10)
+            f"{mock_server}/offices", headers={"Fineract-Platform-TenantId": "default"}, timeout=10
+        )
         assert response.status_code == 401
 
     def test_oauth_key_mode_exchanges_credentials(self, mock_server):
-        config = FineractConfig(base_url=mock_server, auth_mode="oauth-key",
-                                requests_per_second=0)
+        config = FineractConfig(base_url=mock_server, auth_mode="oauth-key", requests_per_second=0)
         instance = FineractClient(config)
         instance.authenticate()
         assert instance._auth_key is not None
@@ -105,8 +117,9 @@ class TestPagination:
         assert len(pages) == 5
 
     def test_max_pages_bounds_the_crawl(self, mock_server):
-        config = FineractConfig(base_url=mock_server, page_size=10, max_pages=2,
-                                requests_per_second=0)
+        config = FineractConfig(
+            base_url=mock_server, page_size=10, max_pages=2, requests_per_second=0
+        )
         instance = FineractClient(config)
         records = list(instance.iter_items("clients", paged=True))
         assert len(records) == 20, "max_pages must cap an unbounded crawl"
@@ -115,8 +128,7 @@ class TestPagination:
     def test_child_collection(self, client):
         loans = list(client.iter_items("loans", paged=True))
         loan_id = next(loan["id"] for loan in loans if loan["status"]["id"] >= 300)
-        transactions = list(
-            client.iter_items(f"loans/{loan_id}/transactions", paged=False))
+        transactions = list(client.iter_items(f"loans/{loan_id}/transactions", paged=False))
         assert transactions
         assert all(tx["loanId"] == loan_id for tx in transactions)
 
@@ -133,13 +145,18 @@ class TestResilience:
         IsolatedHandler.fail_next_n = 3
         try:
             config = FineractConfig(
-                base_url=mock_server, max_retries=12, backoff_base_seconds=0.001,
-                backoff_max_seconds=0.01, requests_per_second=0)
+                base_url=mock_server,
+                max_retries=12,
+                backoff_base_seconds=0.001,
+                backoff_max_seconds=0.01,
+                requests_per_second=0,
+            )
             instance = FineractClient(config)
             offices = list(instance.iter_items("offices", paged=False))
             assert len(offices) == 6, "the request never succeeded after retrying"
             assert instance.retry_count == 3, (
-                f"expected exactly 3 retries, saw {instance.retry_count}")
+                f"expected exactly 3 retries, saw {instance.retry_count}"
+            )
             instance.close()
         finally:
             IsolatedHandler.fail_next_n = 0
@@ -148,8 +165,12 @@ class TestResilience:
         IsolatedHandler.failure_rate = 1.0
         try:
             config = FineractConfig(
-                base_url=mock_server, max_retries=2, backoff_base_seconds=0.001,
-                backoff_max_seconds=0.01, requests_per_second=0)
+                base_url=mock_server,
+                max_retries=2,
+                backoff_base_seconds=0.001,
+                backoff_max_seconds=0.01,
+                requests_per_second=0,
+            )
             instance = FineractClient(config)
             with pytest.raises(FineractError) as error:
                 instance.get("offices")

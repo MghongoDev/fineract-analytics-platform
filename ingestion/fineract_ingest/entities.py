@@ -41,7 +41,7 @@ class Expectation:
     # not_null | unique | non_negative | range | freshness | row_count_min
     kind: str
     columns: tuple[str, ...] = ()
-    severity: str = "error"         # error -> fails the run; warn -> logged + metric only
+    severity: str = "error"  # error -> fails the run; warn -> logged + metric only
     min_value: float | None = None
     max_value: float | None = None
 
@@ -197,11 +197,13 @@ def map_loan(r: Mapping[str, Any]) -> Record:
         "is_closed": parse_bool(status.get("closed")),
         "submitted_on_date": parse_date(timeline.get("submittedOnDate")),
         "approved_on_date": parse_date(timeline.get("approvedOnDate")),
-        "disbursed_on_date": parse_date(timeline.get("actualDisbursementDate")
-                                        or timeline.get("expectedDisbursementDate")),
+        "disbursed_on_date": parse_date(
+            timeline.get("actualDisbursementDate") or timeline.get("expectedDisbursementDate")
+        ),
         "expected_maturity_date": parse_date(timeline.get("expectedMaturityDate")),
-        "closed_on_date": parse_date(timeline.get("closedOnDate")
-                                     or timeline.get("actualMaturityDate")),
+        "closed_on_date": parse_date(
+            timeline.get("closedOnDate") or timeline.get("actualMaturityDate")
+        ),
         "term_frequency": parse_int(r.get("termFrequency")),
         "term_frequency_type": enum_value(r, "termPeriodFrequencyType"),
         "number_of_repayments": parse_int(r.get("numberOfRepayments")),
@@ -232,8 +234,9 @@ def map_loan(r: Mapping[str, Any]) -> Record:
         "total_outstanding": parse_decimal(summary.get("totalOutstanding")),
         "total_overdue": parse_decimal(summary.get("totalOverdue")),
         "overdue_since_date": parse_date(summary.get("overdueSinceDate")),
-        "delinquent_days": parse_int(delinquent.get("pastDueDays")
-                                     or delinquent.get("delinquentDays")),
+        "delinquent_days": parse_int(
+            delinquent.get("pastDueDays") or delinquent.get("delinquentDays")
+        ),
         "delinquent_amount": parse_decimal(delinquent.get("delinquentAmount")),
     }
 
@@ -297,8 +300,12 @@ def map_savings_account(r: Mapping[str, Any]) -> Record:
 # =====================================================================
 ENTITIES: dict[str, EntitySpec] = {
     "offices": EntitySpec(
-        name="offices", path="offices", table="oltp.offices",
-        primary_key="office_id", mapper=map_office, paged=False,
+        name="offices",
+        path="offices",
+        table="oltp.offices",
+        primary_key="office_id",
+        mapper=map_office,
+        paged=False,
         description="Branch hierarchy.",
         expectations=(
             Expectation("office_id_not_null", "not_null", ("office_id",)),
@@ -307,8 +314,12 @@ ENTITIES: dict[str, EntitySpec] = {
         ),
     ),
     "staff": EntitySpec(
-        name="staff", path="staff", table="oltp.staff",
-        primary_key="staff_id", mapper=map_staff, paged=False,
+        name="staff",
+        path="staff",
+        table="oltp.staff",
+        primary_key="staff_id",
+        mapper=map_staff,
+        paged=False,
         description="Loan officers and branch staff.",
         expectations=(
             Expectation("staff_id_not_null", "not_null", ("staff_id",)),
@@ -316,8 +327,12 @@ ENTITIES: dict[str, EntitySpec] = {
         ),
     ),
     "loan_products": EntitySpec(
-        name="loan_products", path="loanproducts", table="oltp.loan_products",
-        primary_key="product_id", mapper=map_loan_product, paged=False,
+        name="loan_products",
+        path="loanproducts",
+        table="oltp.loan_products",
+        primary_key="product_id",
+        mapper=map_loan_product,
+        paged=False,
         description="Loan product catalogue.",
         expectations=(
             Expectation("product_id_not_null", "not_null", ("product_id",)),
@@ -326,8 +341,12 @@ ENTITIES: dict[str, EntitySpec] = {
         ),
     ),
     "savings_products": EntitySpec(
-        name="savings_products", path="savingsproducts", table="oltp.savings_products",
-        primary_key="product_id", mapper=map_savings_product, paged=False,
+        name="savings_products",
+        path="savingsproducts",
+        table="oltp.savings_products",
+        primary_key="product_id",
+        mapper=map_savings_product,
+        paged=False,
         description="Savings product catalogue.",
         expectations=(
             Expectation("product_id_not_null", "not_null", ("product_id",)),
@@ -335,8 +354,12 @@ ENTITIES: dict[str, EntitySpec] = {
         ),
     ),
     "clients": EntitySpec(
-        name="clients", path="clients", table="oltp.clients",
-        primary_key="client_id", mapper=map_client, paged=True,
+        name="clients",
+        path="clients",
+        table="oltp.clients",
+        primary_key="client_id",
+        mapper=map_client,
+        paged=True,
         description="Borrower / member master data.",
         expectations=(
             Expectation("client_id_not_null", "not_null", ("client_id",)),
@@ -345,23 +368,41 @@ ENTITIES: dict[str, EntitySpec] = {
         ),
     ),
     "loans": EntitySpec(
-        name="loans", path="loans", table="oltp.loans",
-        primary_key="loan_id", mapper=map_loan, paged=True,
+        name="loans",
+        path="loans",
+        table="oltp.loans",
+        primary_key="loan_id",
+        mapper=map_loan,
+        paged=True,
         description="Loan accounts with summary balances.",
         expectations=(
             Expectation("loan_id_not_null", "not_null", ("loan_id",)),
             Expectation("loan_id_unique", "unique", ("loan_id",)),
             Expectation("client_id_not_null", "not_null", ("client_id",), "warn"),
             Expectation("principal_non_negative", "non_negative", ("principal",)),
-            Expectation("outstanding_non_negative", "non_negative",
-                        ("principal_outstanding", "total_outstanding"), "warn"),
-            Expectation("interest_rate_sane", "range", ("annual_interest_rate",),
-                        "warn", min_value=0, max_value=200),
+            Expectation(
+                "outstanding_non_negative",
+                "non_negative",
+                ("principal_outstanding", "total_outstanding"),
+                "warn",
+            ),
+            Expectation(
+                "interest_rate_sane",
+                "range",
+                ("annual_interest_rate",),
+                "warn",
+                min_value=0,
+                max_value=200,
+            ),
         ),
     ),
     "savings_accounts": EntitySpec(
-        name="savings_accounts", path="savingsaccounts", table="oltp.savings_accounts",
-        primary_key="savings_id", mapper=map_savings_account, paged=True,
+        name="savings_accounts",
+        path="savingsaccounts",
+        table="oltp.savings_accounts",
+        primary_key="savings_id",
+        mapper=map_savings_account,
+        paged=True,
         description="Deposit accounts.",
         expectations=(
             Expectation("savings_id_not_null", "not_null", ("savings_id",)),
@@ -372,9 +413,13 @@ ENTITIES: dict[str, EntitySpec] = {
     # `parent_id_query` is the source of parent ids, read from what we
     # already landed - so the crawl never needs the whole book in memory.
     "loan_transactions": EntitySpec(
-        name="loan_transactions", path="loans/{parent_id}/transactions",
-        table="oltp.loan_transactions", primary_key="transaction_id",
-        mapper=map_loan_transaction, paged=False, mode="parent",
+        name="loan_transactions",
+        path="loans/{parent_id}/transactions",
+        table="oltp.loan_transactions",
+        primary_key="transaction_id",
+        mapper=map_loan_transaction,
+        paged=False,
+        mode="parent",
         parent_entity="loans",
         parent_id_query=(
             "SELECT loan_id FROM oltp.loans "
@@ -409,5 +454,4 @@ def get_entity(name: str) -> EntitySpec:
     try:
         return ENTITIES[name]
     except KeyError as exc:
-        raise KeyError(
-            f"Unknown entity '{name}'. Known: {', '.join(sorted(ENTITIES))}") from exc
+        raise KeyError(f"Unknown entity '{name}'. Known: {', '.join(sorted(ENTITIES))}") from exc

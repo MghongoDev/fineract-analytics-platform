@@ -56,8 +56,9 @@ class ExpectationResult:
 # ---------------------------------------------------------------------
 # Row level
 # ---------------------------------------------------------------------
-def validate_record(spec: EntitySpec, mapped: Mapping[str, Any],
-                    raw: Mapping[str, Any]) -> RejectedRecord | None:
+def validate_record(
+    spec: EntitySpec, mapped: Mapping[str, Any], raw: Mapping[str, Any]
+) -> RejectedRecord | None:
     """Return a rejection if the mapped record cannot be safely landed."""
     pk_value = mapped.get(spec.primary_key)
     if pk_value is None:
@@ -70,21 +71,26 @@ def validate_record(spec: EntitySpec, mapped: Mapping[str, Any],
         )
     if isinstance(pk_value, int) and pk_value < 0:
         return RejectedRecord(
-            entity=spec.name, source_key=str(pk_value),
+            entity=spec.name,
+            source_key=str(pk_value),
             rule="primary_key_positive",
             error_message=f"primary key '{spec.primary_key}' is negative",
-            payload=raw)
+            payload=raw,
+        )
 
     # A record whose every business column is NULL is a parsing failure
     # wearing a valid-looking primary key.
-    business_values = [v for k, v in mapped.items()
-                       if k != spec.primary_key and not k.startswith("_")]
+    business_values = [
+        v for k, v in mapped.items() if k != spec.primary_key and not k.startswith("_")
+    ]
     if business_values and all(v is None for v in business_values):
         return RejectedRecord(
-            entity=spec.name, source_key=str(pk_value),
+            entity=spec.name,
+            source_key=str(pk_value),
             rule="record_not_empty",
             error_message="all non-key columns parsed to NULL",
-            payload=raw)
+            payload=raw,
+        )
     return None
 
 
@@ -123,20 +129,21 @@ def _check_unique(rows: Sequence[Mapping[str, Any]], columns: Iterable[str]) -> 
 
 
 def _check_non_negative(
-        rows: Sequence[Mapping[str, Any]], columns: Iterable[str]) -> tuple[int, str]:
+    rows: Sequence[Mapping[str, Any]], columns: Iterable[str]
+) -> tuple[int, str]:
     failures = 0
     detail: list[str] = []
     for column in columns:
-        bad = sum(1 for row in rows
-                  if (n := _numeric(row.get(column))) is not None and n < 0)
+        bad = sum(1 for row in rows if (n := _numeric(row.get(column))) is not None and n < 0)
         if bad:
             failures += bad
             detail.append(f"{column}={bad}")
     return failures, "negative values: " + ", ".join(detail) if detail else ""
 
 
-def _check_range(rows: Sequence[Mapping[str, Any]], columns: Iterable[str],
-                 low: float | None, high: float | None) -> tuple[int, str]:
+def _check_range(
+    rows: Sequence[Mapping[str, Any]], columns: Iterable[str], low: float | None, high: float | None
+) -> tuple[int, str]:
     failures = 0
     detail: list[str] = []
     for column in columns:
@@ -153,8 +160,9 @@ def _check_range(rows: Sequence[Mapping[str, Any]], columns: Iterable[str],
     return failures, f"outside [{low}, {high}]: " + ", ".join(detail) if detail else ""
 
 
-def evaluate_expectations(spec: EntitySpec,
-                          rows: Sequence[Mapping[str, Any]]) -> list[ExpectationResult]:
+def evaluate_expectations(
+    spec: EntitySpec, rows: Sequence[Mapping[str, Any]]
+) -> list[ExpectationResult]:
     """Run every declared expectation for an entity against a batch."""
     results: list[ExpectationResult] = []
     for expectation in spec.expectations:
@@ -162,17 +170,20 @@ def evaluate_expectations(spec: EntitySpec,
     return results
 
 
-def _evaluate_one(expectation: Expectation,
-                  rows: Sequence[Mapping[str, Any]]) -> ExpectationResult:
+def _evaluate_one(expectation: Expectation, rows: Sequence[Mapping[str, Any]]) -> ExpectationResult:
     kind = expectation.kind
     if kind == "row_count_min":
         threshold = expectation.min_value or 1
         observed = float(len(rows))
         return ExpectationResult(
-            expectation.name, kind, expectation.severity,
-            passed=observed >= threshold, observed_value=observed,
+            expectation.name,
+            kind,
+            expectation.severity,
+            passed=observed >= threshold,
+            observed_value=observed,
             threshold_value=threshold,
-            details=f"{int(observed)} rows (min {int(threshold)})")
+            details=f"{int(observed)} rows (min {int(threshold)})",
+        )
 
     if kind == "not_null":
         failures, detail = _check_not_null(rows, expectation.columns)
@@ -181,16 +192,27 @@ def _evaluate_one(expectation: Expectation,
     elif kind == "non_negative":
         failures, detail = _check_non_negative(rows, expectation.columns)
     elif kind == "range":
-        failures, detail = _check_range(rows, expectation.columns,
-                                        expectation.min_value, expectation.max_value)
+        failures, detail = _check_range(
+            rows, expectation.columns, expectation.min_value, expectation.max_value
+        )
     else:
-        return ExpectationResult(expectation.name, kind, "warn", passed=True,
-                                 details=f"unknown expectation kind '{kind}' - skipped")
+        return ExpectationResult(
+            expectation.name,
+            kind,
+            "warn",
+            passed=True,
+            details=f"unknown expectation kind '{kind}' - skipped",
+        )
 
     return ExpectationResult(
-        expectation.name, kind, expectation.severity,
-        passed=failures == 0, observed_value=float(failures), threshold_value=0.0,
-        details=detail or "ok")
+        expectation.name,
+        kind,
+        expectation.severity,
+        passed=failures == 0,
+        observed_value=float(failures),
+        threshold_value=0.0,
+        details=detail or "ok",
+    )
 
 
 def summarise(results: Sequence[ExpectationResult]) -> dict[str, Any]:

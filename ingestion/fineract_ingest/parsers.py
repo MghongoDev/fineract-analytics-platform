@@ -51,10 +51,16 @@ def parse_date(value: Any) -> date | None:
             return None
     if isinstance(value, str):
         text = value.strip()
-        for fmt in ("%Y-%m-%d", "%d %B %Y", "%d/%m/%Y", "%Y-%m-%dT%H:%M:%S",
-                    "%Y-%m-%dT%H:%M:%S.%f", "%Y-%m-%d %H:%M:%S"):
+        for fmt in (
+            "%Y-%m-%d",
+            "%d %B %Y",
+            "%d/%m/%Y",
+            "%Y-%m-%dT%H:%M:%S",
+            "%Y-%m-%dT%H:%M:%S.%f",
+            "%Y-%m-%d %H:%M:%S",
+        ):
             try:
-                return datetime.strptime(text[:len(fmt) + 8], fmt).date()
+                return datetime.strptime(text[: len(fmt) + 8], fmt).date()
             except ValueError:
                 continue
         try:
@@ -182,8 +188,7 @@ def payload_hash(record: Mapping[str, Any], exclude: Iterable[str] = ()) -> str:
     """
     excluded = set(exclude) | {"_ingested_at", "_updated_at", "_payload_hash"}
     material = {k: v for k, v in sorted(record.items()) if k not in excluded}
-    encoded = json.dumps(material, sort_keys=True, default=_json_default,
-                         separators=(",", ":"))
+    encoded = json.dumps(material, sort_keys=True, default=_json_default, separators=(",", ":"))
     return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
 
 
@@ -197,4 +202,4 @@ def _json_default(value: Any) -> Any:
 
 def chunked(sequence: Sequence[Any], size: int) -> Iterable[Sequence[Any]]:
     for start in range(0, len(sequence), size):
-        yield sequence[start:start + size]
+        yield sequence[start : start + size]
