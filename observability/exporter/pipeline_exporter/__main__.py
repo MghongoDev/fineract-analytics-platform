@@ -28,10 +28,13 @@ def main() -> int:
     signal.signal(signal.SIGTERM, _shutdown)
     signal.signal(signal.SIGINT, _shutdown)
 
-    log.info("starting_exporter", extra={
-        "port": cfg.port,
-        "scrape_interval_seconds": cfg.scrape_interval_seconds,
-    })
+    log.info(
+        "starting_exporter",
+        extra={
+            "port": cfg.port,
+            "scrape_interval_seconds": cfg.scrape_interval_seconds,
+        },
+    )
     exporter.start()
 
     # start_http_server runs its own daemon thread; block the main thread

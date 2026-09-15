@@ -52,7 +52,8 @@ class ClickHouseConfig:
     user: str = field(default_factory=lambda: _env("CLICKHOUSE_USER", "analytics"))
     password: str = field(default_factory=lambda: _env("CLICKHOUSE_PASSWORD", "analytics"))
     request_timeout: float = field(
-        default_factory=lambda: float(_env("CLICKHOUSE_HTTP_TIMEOUT", "10")))
+        default_factory=lambda: float(_env("CLICKHOUSE_HTTP_TIMEOUT", "10"))
+    )
 
 
 @dataclass(frozen=True)
@@ -61,6 +62,7 @@ class ExporterConfig:
 
     port: int = field(default_factory=lambda: _env_int("EXPORTER_PORT", 9105))
     scrape_interval_seconds: int = field(
-        default_factory=lambda: _env_int("EXPORTER_SCRAPE_INTERVAL_SECONDS", 30))
+        default_factory=lambda: _env_int("EXPORTER_SCRAPE_INTERVAL_SECONDS", 30)
+    )
     postgres: PostgresConfig = field(default_factory=PostgresConfig)
     clickhouse: ClickHouseConfig = field(default_factory=ClickHouseConfig)

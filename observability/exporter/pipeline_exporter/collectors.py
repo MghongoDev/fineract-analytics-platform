@@ -100,7 +100,8 @@ class IngestionRunCollector:
 
         last_success_ts = [
             MetricSample({"entity": entity}, float(epoch))
-            for entity, epoch in last_success if epoch is not None
+            for entity, epoch in last_success
+            if epoch is not None
         ]
 
         return {
@@ -219,8 +220,8 @@ class CdcParseErrorCollector:
 
     def collect(self, pg: PgExecutor, ch: ChExecutor) -> Mapping[str, list[MetricSample]]:
         rows = ch.query(
-            "SELECT topic, count() AS errors "
-            "FROM fineract_raw.cdc_errors GROUP BY topic")
+            "SELECT topic, count() AS errors FROM fineract_raw.cdc_errors GROUP BY topic"
+        )
         return {
             "parse_errors_total": [
                 MetricSample({"topic": r["topic"]}, float(r["errors"])) for r in rows
@@ -266,8 +267,8 @@ class MergeHealthCollector:
 
     def collect(self, pg: PgExecutor, ch: ChExecutor) -> Mapping[str, list[MetricSample]]:
         rows = ch.query(
-            "SELECT database, table, active_parts, size_mb "
-            "FROM fineract_ops.v_merge_health")
+            "SELECT database, table, active_parts, size_mb FROM fineract_ops.v_merge_health"
+        )
         parts, bytes_ = [], []
         for r in rows:
             labels = {"database": r["database"], "table": r["table"]}
