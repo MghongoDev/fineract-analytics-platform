@@ -79,8 +79,9 @@ class RateLimiter:
 class FineractClient:
     """Thin, resilient wrapper around the Fineract v1 API."""
 
-    def __init__(self, config: FineractConfig | None = None,
-                 session: requests.Session | None = None):
+    def __init__(
+        self, config: FineractConfig | None = None, session: requests.Session | None = None
+    ):
         self.config = config or FineractConfig()
         self.session = session or requests.Session()
         self.session.mount("https://", HTTPAdapter(pool_connections=4, pool_maxsize=8))
@@ -129,8 +130,10 @@ class FineractClient:
             response = self.session.post(
                 url,
                 json={"username": self.config.username, "password": self.config.password},
-                headers={"Fineract-Platform-TenantId": self.config.tenant_id,
-                         "Content-Type": "application/json"},
+                headers={
+                    "Fineract-Platform-TenantId": self.config.tenant_id,
+                    "Content-Type": "application/json",
+                },
                 timeout=(self.config.connect_timeout, self.config.read_timeout),
                 verify=self.config.verify_ssl,
             )
@@ -139,8 +142,9 @@ class FineractClient:
             self._auth_key = response.json().get("base64EncodedAuthenticationKey")
             log.info("fineract_authenticated", extra={"auth_mode": "oauth-key"})
         except Exception as exc:  # pragma: no cover - defensive
-            log.warning("fineract_authentication_failed_falling_back_to_basic",
-                        extra={"error": str(exc)})
+            log.warning(
+                "fineract_authentication_failed_falling_back_to_basic", extra={"error": str(exc)}
+            )
             self._auth_key = None
 
     # ------------------------------------------------------------------
@@ -157,8 +161,9 @@ class FineractClient:
                 return
             except ValueError:
                 pass
-        delay = min(self.config.backoff_base_seconds * (2 ** attempt),
-                    self.config.backoff_max_seconds)
+        delay = min(
+            self.config.backoff_base_seconds * (2**attempt), self.config.backoff_max_seconds
+        )
         time.sleep(delay * (0.5 + random.random() / 2))  # full-ish jitter
 
     def get(self, path: str, params: dict[str, Any] | None = None) -> Any:
@@ -183,30 +188,38 @@ class FineractClient:
 
                 if response.status_code in RETRYABLE_STATUS:
                     self.retry_count += 1
-                    log.warning("fineract_retryable_status", extra={
-                        "path": path, "status": response.status_code, "attempt": attempt})
+                    log.warning(
+                        "fineract_retryable_status",
+                        extra={"path": path, "status": response.status_code, "attempt": attempt},
+                    )
                     if attempt < self.config.max_retries:
                         self._sleep_for_attempt(attempt, response.headers.get("Retry-After"))
                         continue
                     self.error_count += 1
                     raise FineractError(
                         f"GET {path} failed after {attempt + 1} attempts",
-                        response.status_code, response.text)
+                        response.status_code,
+                        response.text,
+                    )
 
                 if response.status_code >= 400:
                     # Non-retryable (403 permission, 404 missing endpoint...).
                     self.error_count += 1
                     raise FineractError(
                         f"GET {path} returned {response.status_code}",
-                        response.status_code, response.text)
+                        response.status_code,
+                        response.text,
+                    )
 
                 return response.json()
 
             except (requests.ConnectionError, requests.Timeout) as exc:
                 last_error = exc
                 self.retry_count += 1
-                log.warning("fineract_transport_error", extra={
-                    "path": path, "attempt": attempt, "error": str(exc)})
+                log.warning(
+                    "fineract_transport_error",
+                    extra={"path": path, "attempt": attempt, "error": str(exc)},
+                )
                 if attempt < self.config.max_retries:
                     self._sleep_for_attempt(attempt, None)
                     continue
@@ -233,9 +246,9 @@ class FineractClient:
             return [payload], 1
         return [], 0
 
-    def iter_pages(self, path: str,
-                   params: dict[str, Any] | None = None,
-                   paged: bool = True) -> Iterator[list[dict]]:
+    def iter_pages(
+        self, path: str, params: dict[str, Any] | None = None, paged: bool = True
+    ) -> Iterator[list[dict]]:
         """Yield successive pages of a collection endpoint.
 
         Terminates on: short page, offset >= totalFilteredRecords, empty
@@ -269,12 +282,14 @@ class FineractClient:
             if total is not None and offset >= total:
                 return
             if page_no == self.config.max_pages - 1:
-                log.warning("fineract_max_pages_reached", extra={
-                    "path": path, "max_pages": self.config.max_pages, "fetched": offset})
+                log.warning(
+                    "fineract_max_pages_reached",
+                    extra={"path": path, "max_pages": self.config.max_pages, "fetched": offset},
+                )
 
-    def iter_items(self, path: str,
-                   params: dict[str, Any] | None = None,
-                   paged: bool = True) -> Iterator[dict]:
+    def iter_items(
+        self, path: str, params: dict[str, Any] | None = None, paged: bool = True
+    ) -> Iterator[dict]:
         for page in self.iter_pages(path, params=params, paged=paged):
             yield from page
 

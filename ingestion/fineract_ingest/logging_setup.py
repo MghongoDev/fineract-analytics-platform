@@ -27,10 +27,29 @@ class ContextFilter(logging.Filter):
 
 class JsonFormatter(logging.Formatter):
     RESERVED = {
-        "args", "asctime", "created", "exc_info", "exc_text", "filename",
-        "funcName", "levelname", "levelno", "lineno", "module", "msecs",
-        "message", "msg", "name", "pathname", "process", "processName",
-        "relativeCreated", "stack_info", "thread", "threadName", "taskName",
+        "args",
+        "asctime",
+        "created",
+        "exc_info",
+        "exc_text",
+        "filename",
+        "funcName",
+        "levelname",
+        "levelno",
+        "lineno",
+        "module",
+        "msecs",
+        "message",
+        "msg",
+        "name",
+        "pathname",
+        "process",
+        "processName",
+        "relativeCreated",
+        "stack_info",
+        "thread",
+        "threadName",
+        "taskName",
     }
 
     def format(self, record: logging.LogRecord) -> str:  # noqa: D102
@@ -60,8 +79,9 @@ def configure(level: str = "INFO", fmt: str = "json") -> None:
     if fmt == "json":
         handler.setFormatter(JsonFormatter())
     else:
-        handler.setFormatter(logging.Formatter(
-            "%(asctime)s %(levelname)-7s %(name)s | %(message)s"))
+        handler.setFormatter(
+            logging.Formatter("%(asctime)s %(levelname)-7s %(name)s | %(message)s")
+        )
     handler.addFilter(ContextFilter())
     root.addHandler(handler)
     root.setLevel(getattr(logging, level.upper(), logging.INFO))

@@ -61,7 +61,8 @@ class TestParseDate:
 class TestParseTimestamp:
     def test_six_element_array(self):
         assert parse_timestamp([2026, 8, 11, 14, 30, 15]) == datetime(
-            2026, 8, 11, 14, 30, 15, tzinfo=timezone.utc)
+            2026, 8, 11, 14, 30, 15, tzinfo=timezone.utc
+        )
 
     def test_iso_string_with_z_suffix(self):
         parsed = parse_timestamp("2026-08-11T14:30:00Z")
@@ -94,14 +95,27 @@ class TestParseDecimal:
 
 
 class TestParseScalars:
-    @pytest.mark.parametrize("value,expected", [
-        (1, 1), ("42", 42), (3.7, 3), ("3.7", 3), (None, None), ("", None), ("x", None)])
+    @pytest.mark.parametrize(
+        "value,expected",
+        [(1, 1), ("42", 42), (3.7, 3), ("3.7", 3), (None, None), ("", None), ("x", None)],
+    )
     def test_parse_int(self, value, expected):
         assert parse_int(value) == expected
 
-    @pytest.mark.parametrize("value,expected", [
-        (True, True), (False, False), ("true", True), ("TRUE", True),
-        ("false", False), (1, True), (0, False), (None, None), ("", None)])
+    @pytest.mark.parametrize(
+        "value,expected",
+        [
+            (True, True),
+            (False, False),
+            ("true", True),
+            ("TRUE", True),
+            ("false", False),
+            (1, True),
+            (0, False),
+            (None, None),
+            ("", None),
+        ],
+    )
     def test_parse_bool(self, value, expected):
         assert parse_bool(value) == expected
 

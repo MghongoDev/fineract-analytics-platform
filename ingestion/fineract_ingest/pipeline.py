@@ -57,10 +57,13 @@ class EntityOutcome:
 
 
 class IngestionPipeline:
-    def __init__(self, settings: Settings | None = None,
-                 client: FineractClient | None = None,
-                 loader: PostgresLoader | None = None,
-                 metrics: IngestionMetrics | None = None):
+    def __init__(
+        self,
+        settings: Settings | None = None,
+        client: FineractClient | None = None,
+        loader: PostgresLoader | None = None,
+        metrics: IngestionMetrics | None = None,
+    ):
         self.settings = settings or Settings.load()
         self.client = client or FineractClient(self.settings.fineract)
         self.loader = loader or PostgresLoader(self.settings.postgres)
@@ -75,18 +78,19 @@ class IngestionPipeline:
     # ------------------------------------------------------------------
     # Fetch
     # ------------------------------------------------------------------
-    def _fetch_records(self, spec: EntitySpec,
-                       parent_limit: int | None = None) -> Iterable[Mapping[str, Any]]:
+    def _fetch_records(
+        self, spec: EntitySpec, parent_limit: int | None = None
+    ) -> Iterable[Mapping[str, Any]]:
         """Yield raw API records for an entity, flat or parent-driven."""
         if spec.mode == "parent":
             parent_ids = self.loader.fetch_parent_ids(spec.parent_id_query or "", parent_limit)
-            log.info("fetching_child_collection", extra={
-                "entity": spec.name, "parents": len(parent_ids)})
+            log.info(
+                "fetching_child_collection", extra={"entity": spec.name, "parents": len(parent_ids)}
+            )
             for parent_id in parent_ids:
                 path = spec.path.format(parent_id=parent_id)
                 try:
-                    for record in self.client.iter_items(path, dict(spec.params),
-                                                         paged=spec.paged):
+                    for record in self.client.iter_items(path, dict(spec.params), paged=spec.paged):
                         # Some Fineract builds omit loanId on the nested
                         # transaction resource; carry the parent down.
                         enriched = dict(record)
@@ -96,19 +100,24 @@ class IngestionPipeline:
                 except FineractError as exc:
                     # A single unreadable loan (permissions, deleted mid-crawl)
                     # must not sink the whole entity.
-                    log.warning("child_collection_failed", extra={
-                        "entity": spec.name, "parent_id": parent_id,
-                        "status": exc.status_code, "error": str(exc)})
+                    log.warning(
+                        "child_collection_failed",
+                        extra={
+                            "entity": spec.name,
+                            "parent_id": parent_id,
+                            "status": exc.status_code,
+                            "error": str(exc),
+                        },
+                    )
         else:
-            yield from self.client.iter_items(spec.path, dict(spec.params),
-                                              paged=spec.paged)
+            yield from self.client.iter_items(spec.path, dict(spec.params), paged=spec.paged)
 
     # ------------------------------------------------------------------
     # Map + validate
     # ------------------------------------------------------------------
-    def _map_and_validate(self, spec: EntitySpec,
-                          raw_records: Iterable[Mapping[str, Any]]
-                          ) -> tuple[list[dict], list[RejectedRecord]]:
+    def _map_and_validate(
+        self, spec: EntitySpec, raw_records: Iterable[Mapping[str, Any]]
+    ) -> tuple[list[dict], list[RejectedRecord]]:
         mapped_rows: list[dict] = []
         rejects: list[RejectedRecord] = []
         seen_keys: set[Any] = set()
@@ -117,8 +126,7 @@ class IngestionPipeline:
             try:
                 mapped = spec.mapper(raw)
             except Exception as exc:  # mapping bug or wildly unexpected payload
-                rejects.append(RejectedRecord(
-                    spec.name, None, "mapper_exception", str(exc), raw))
+                rejects.append(RejectedRecord(spec.name, None, "mapper_exception", str(exc), raw))
                 continue
 
             rejection = validate_record(spec, mapped, raw)
@@ -143,17 +151,21 @@ class IngestionPipeline:
     # ------------------------------------------------------------------
     # Run one entity
     # ------------------------------------------------------------------
-    def run_entity(self, entity_name: str, parent_limit: int | None = None,
-                   dry_run: bool = False) -> EntityOutcome:
+    def run_entity(
+        self, entity_name: str, parent_limit: int | None = None, dry_run: bool = False
+    ) -> EntityOutcome:
         spec = get_entity(entity_name)
         started = time.monotonic()
         bind(entity=entity_name)
-        log.info("entity_load_started", extra={
-            "entity": entity_name, "table": spec.table, "mode": spec.mode})
+        log.info(
+            "entity_load_started",
+            extra={"entity": entity_name, "table": spec.table, "mode": spec.mode},
+        )
 
         connection = self.loader.connect()
         run_id = self.loader.start_run(
-            connection, entity_name, self.batch_id, self.settings.runtime.dag_run_id)
+            connection, entity_name, self.batch_id, self.settings.runtime.dag_run_id
+        )
 
         requests_before = self.client.request_count
         retries_before = self.client.retry_count
@@ -172,23 +184,31 @@ class IngestionPipeline:
                 raise ValueError(
                     f"reject ratio {reject_ratio:.1%} exceeds threshold "
                     f"{self.settings.runtime.max_reject_ratio:.1%} "
-                    f"({len(rejects)}/{len(raw_records)} records)")
+                    f"({len(rejects)}/{len(raw_records)} records)"
+                )
 
             if blocking:
                 raise ValueError(
                     "blocking data-quality failures: "
-                    + ", ".join(f"{e.name} ({e.details})" for e in blocking))
+                    + ", ".join(f"{e.name} ({e.details})" for e in blocking)
+                )
 
             if dry_run:
-                log.info("dry_run_no_write", extra={
-                    "entity": entity_name, "would_write": len(mapped_rows),
-                    "rejects": len(rejects)})
+                log.info(
+                    "dry_run_no_write",
+                    extra={
+                        "entity": entity_name,
+                        "would_write": len(mapped_rows),
+                        "rejects": len(rejects),
+                    },
+                )
                 connection.rollback()
                 result = LoadResult(entity_name)
                 result.rows_read = len(mapped_rows)
                 result.rows_rejected = len(rejects)
-                outcome = EntityOutcome(entity_name, "skipped", result,
-                                        time.monotonic() - started, expectations)
+                outcome = EntityOutcome(
+                    entity_name, "skipped", result, time.monotonic() - started, expectations
+                )
                 self.loader.finish_run(connection, run_id, "skipped", result)
                 connection.commit()
                 return outcome
@@ -198,34 +218,49 @@ class IngestionPipeline:
             result.rows_rejected = self.loader.record_rejects(connection, self.batch_id, rejects)
             self.loader.record_expectations(connection, self.batch_id, entity_name, expectations)
             self.loader.update_watermark(
-                connection, entity_name,
+                connection,
+                entity_name,
                 cursor_value=self._cursor_value(spec, mapped_rows),
-                row_count=result.rows_read)
+                row_count=result.rows_read,
+            )
             self.loader.finish_run(
-                connection, run_id, "success", result,
+                connection,
+                run_id,
+                "success",
+                result,
                 api_requests=self.client.request_count - requests_before,
-                api_retries=self.client.retry_count - retries_before)
+                api_retries=self.client.retry_count - retries_before,
+            )
             connection.commit()
             # ----------------------------------------------------------
 
             duration = time.monotonic() - started
             requests = self.client.request_count - requests_before
-            mean_latency = ((self.client.total_latency_seconds - latency_before) / requests
-                            if requests else 0.0)
+            mean_latency = (
+                (self.client.total_latency_seconds - latency_before) / requests if requests else 0.0
+            )
 
             self.metrics.record_load(
-                entity_name, **result.as_dict(), duration_seconds=duration,
+                entity_name,
+                **result.as_dict(),
+                duration_seconds=duration,
                 api_requests=requests,
                 api_retries=self.client.retry_count - retries_before,
-                mean_latency_seconds=mean_latency, status="success",
-                table_rows=self.loader.table_count(spec.table))
-            self.metrics.record_expectations(
-                entity_name, summary["errors"], summary["warnings"])
+                mean_latency_seconds=mean_latency,
+                status="success",
+                table_rows=self.loader.table_count(spec.table),
+            )
+            self.metrics.record_expectations(entity_name, summary["errors"], summary["warnings"])
 
-            log.info("entity_load_succeeded", extra={
-                "entity": entity_name, **result.as_dict(),
-                "duration_seconds": round(duration, 2),
-                "expectations": summary})
+            log.info(
+                "entity_load_succeeded",
+                extra={
+                    "entity": entity_name,
+                    **result.as_dict(),
+                    "duration_seconds": round(duration, 2),
+                    "expectations": summary,
+                },
+            )
 
             return EntityOutcome(entity_name, "success", result, duration, expectations)
 
@@ -234,19 +269,30 @@ class IngestionPipeline:
             duration = time.monotonic() - started
             failed = LoadResult(entity_name)
             try:
-                self.loader.finish_run(connection, run_id, "failed", failed,
-                                       error_message=str(exc)[:2000])
+                self.loader.finish_run(
+                    connection, run_id, "failed", failed, error_message=str(exc)[:2000]
+                )
                 connection.commit()
             except Exception:  # pragma: no cover
                 connection.rollback()
             self.metrics.record_load(
-                entity_name, **failed.as_dict(), duration_seconds=duration,
+                entity_name,
+                **failed.as_dict(),
+                duration_seconds=duration,
                 api_requests=self.client.request_count - requests_before,
                 api_retries=self.client.retry_count - retries_before,
-                mean_latency_seconds=0.0, status="failed")
-            log.error("entity_load_failed", extra={
-                "entity": entity_name, "error": str(exc),
-                "duration_seconds": round(duration, 2)}, exc_info=True)
+                mean_latency_seconds=0.0,
+                status="failed",
+            )
+            log.error(
+                "entity_load_failed",
+                extra={
+                    "entity": entity_name,
+                    "error": str(exc),
+                    "duration_seconds": round(duration, 2),
+                },
+                exc_info=True,
+            )
             return EntityOutcome(entity_name, "failed", failed, duration, error=str(exc))
 
     @staticmethod
@@ -259,14 +305,22 @@ class IngestionPipeline:
     # ------------------------------------------------------------------
     # Run many
     # ------------------------------------------------------------------
-    def run(self, entities: Sequence[str] | None = None,
-            parent_limit: int | None = None,
-            dry_run: bool = False,
-            fail_fast: bool = False) -> list[EntityOutcome]:
+    def run(
+        self,
+        entities: Sequence[str] | None = None,
+        parent_limit: int | None = None,
+        dry_run: bool = False,
+        fail_fast: bool = False,
+    ) -> list[EntityOutcome]:
         selected = list(entities) if entities else list(DEFAULT_ORDER)
-        log.info("ingestion_started", extra={
-            "entities": selected, "dry_run": dry_run,
-            "source": self.settings.fineract.masked()})
+        log.info(
+            "ingestion_started",
+            extra={
+                "entities": selected,
+                "dry_run": dry_run,
+                "source": self.settings.fineract.masked(),
+            },
+        )
 
         self.client.authenticate()
         outcomes: list[EntityOutcome] = []
@@ -279,12 +333,17 @@ class IngestionPipeline:
 
         self.metrics.push()
         failed = [o.entity for o in outcomes if o.status == "failed"]
-        log.info("ingestion_finished", extra={
-            "entities": len(outcomes), "failed": failed,
-            "rows_inserted": sum(o.result.rows_inserted for o in outcomes),
-            "rows_updated": sum(o.result.rows_updated for o in outcomes),
-            "rows_unchanged": sum(o.result.rows_unchanged for o in outcomes),
-            "rows_rejected": sum(o.result.rows_rejected for o in outcomes)})
+        log.info(
+            "ingestion_finished",
+            extra={
+                "entities": len(outcomes),
+                "failed": failed,
+                "rows_inserted": sum(o.result.rows_inserted for o in outcomes),
+                "rows_updated": sum(o.result.rows_updated for o in outcomes),
+                "rows_unchanged": sum(o.result.rows_unchanged for o in outcomes),
+                "rows_rejected": sum(o.result.rows_rejected for o in outcomes),
+            },
+        )
         return outcomes
 
     def close(self) -> None:

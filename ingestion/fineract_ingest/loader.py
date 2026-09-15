@@ -75,8 +75,9 @@ class LoadResult:
 
 
 class PostgresLoader:
-    def __init__(self, config: PostgresConfig | None = None,
-                 connection: psycopg.Connection | None = None):
+    def __init__(
+        self, config: PostgresConfig | None = None, connection: psycopg.Connection | None = None
+    ):
         self.config = config or PostgresConfig()
         self._external_connection = connection
         self._connection: psycopg.Connection | None = connection
@@ -91,7 +92,9 @@ class PostgresLoader:
             with self._connection.cursor() as cursor:
                 cursor.execute(
                     sql.SQL("SET statement_timeout = {}").format(
-                        sql.Literal(self.config.statement_timeout_ms)))
+                        sql.Literal(self.config.statement_timeout_ms)
+                    )
+                )
             self._connection.commit()
         return self._connection
 
@@ -119,8 +122,13 @@ class PostgresLoader:
     # ------------------------------------------------------------------
     # Upsert
     # ------------------------------------------------------------------
-    def upsert(self, connection: psycopg.Connection, table: str,
-               primary_key: str, rows: Sequence[Mapping[str, Any]]) -> LoadResult:
+    def upsert(
+        self,
+        connection: psycopg.Connection,
+        table: str,
+        primary_key: str,
+        rows: Sequence[Mapping[str, Any]],
+    ) -> LoadResult:
         """Bulk upsert a batch of mapped records into ``table``."""
         result = LoadResult(table)
         if not rows:
@@ -144,7 +152,8 @@ class PostgresLoader:
             pk=sql.Identifier(primary_key),
             assignments=sql.SQL(", ").join(
                 sql.SQL("{col} = EXCLUDED.{col}").format(col=sql.Identifier(c))
-                for c in update_columns),
+                for c in update_columns
+            ),
         )
 
         with connection.cursor() as cursor:
@@ -166,8 +175,13 @@ class PostgresLoader:
     # ------------------------------------------------------------------
     # Control plane
     # ------------------------------------------------------------------
-    def start_run(self, connection: psycopg.Connection, entity: str,
-                  batch_id: uuid.UUID, dag_run_id: str | None) -> int:
+    def start_run(
+        self,
+        connection: psycopg.Connection,
+        entity: str,
+        batch_id: uuid.UUID,
+        dag_run_id: str | None,
+    ) -> int:
         with connection.cursor() as cursor:
             cursor.execute(
                 """
@@ -178,12 +192,19 @@ class PostgresLoader:
                 (str(batch_id), entity, dag_run_id),
             )
             row = cursor.fetchone()
-        connection.commit()          # visible immediately: a crashed run stays 'running'
+        connection.commit()  # visible immediately: a crashed run stays 'running'
         return int(row[0])
 
-    def finish_run(self, connection: psycopg.Connection, run_id: int, status: str,
-                   result: LoadResult, api_requests: int = 0, api_retries: int = 0,
-                   error_message: str | None = None) -> None:
+    def finish_run(
+        self,
+        connection: psycopg.Connection,
+        run_id: int,
+        status: str,
+        result: LoadResult,
+        api_requests: int = 0,
+        api_retries: int = 0,
+        error_message: str | None = None,
+    ) -> None:
         with connection.cursor() as cursor:
             cursor.execute(
                 """
@@ -201,13 +222,23 @@ class PostgresLoader:
                        error_message    = %s
                  WHERE run_id = %s
                 """,
-                (status, result.rows_read, result.rows_inserted, result.rows_updated,
-                 result.rows_unchanged, result.rows_rejected, api_requests,
-                 api_retries, error_message, run_id),
+                (
+                    status,
+                    result.rows_read,
+                    result.rows_inserted,
+                    result.rows_updated,
+                    result.rows_unchanged,
+                    result.rows_rejected,
+                    api_requests,
+                    api_retries,
+                    error_message,
+                    run_id,
+                ),
             )
 
-    def update_watermark(self, connection: psycopg.Connection, entity: str,
-                         cursor_value: str | None, row_count: int) -> None:
+    def update_watermark(
+        self, connection: psycopg.Connection, entity: str, cursor_value: str | None, row_count: int
+    ) -> None:
         with connection.cursor() as cursor:
             cursor.execute(
                 """
@@ -236,18 +267,24 @@ class PostgresLoader:
                        total_rows_loaded
                   FROM meta.ingestion_watermark
                  WHERE entity = %s
-                """, (entity,))
+                """,
+                (entity,),
+            )
             row = cursor.fetchone()
         connection.commit()
         if not row:
             return None
         return {
-            "entity": row[0], "last_success_at": row[1], "last_cursor": row[2],
-            "last_row_count": row[3], "total_rows_loaded": row[4],
+            "entity": row[0],
+            "last_success_at": row[1],
+            "last_cursor": row[2],
+            "last_row_count": row[3],
+            "total_rows_loaded": row[4],
         }
 
-    def record_rejects(self, connection: psycopg.Connection, batch_id: uuid.UUID,
-                       rejects: Iterable[RejectedRecord]) -> int:
+    def record_rejects(
+        self, connection: psycopg.Connection, batch_id: uuid.UUID, rejects: Iterable[RejectedRecord]
+    ) -> int:
         rows = list(rejects)
         if not rows:
             return 0
@@ -259,14 +296,25 @@ class PostgresLoader:
                         (batch_id, entity, source_key, rule, error_message, payload)
                     VALUES (%s, %s, %s, %s, %s, %s)
                     """,
-                    (str(batch_id), reject.entity, reject.source_key, reject.rule,
-                     reject.error_message, Json(dict(reject.payload))),
+                    (
+                        str(batch_id),
+                        reject.entity,
+                        reject.source_key,
+                        reject.rule,
+                        reject.error_message,
+                        Json(dict(reject.payload)),
+                    ),
                 )
         return len(rows)
 
-    def record_expectations(self, connection: psycopg.Connection, batch_id: uuid.UUID,
-                            entity: str, results: Iterable[ExpectationResult],
-                            layer: str = "ingestion") -> None:
+    def record_expectations(
+        self,
+        connection: psycopg.Connection,
+        batch_id: uuid.UUID,
+        entity: str,
+        results: Iterable[ExpectationResult],
+        layer: str = "ingestion",
+    ) -> None:
         with connection.cursor() as cursor:
             for item in results:
                 cursor.execute(
@@ -276,9 +324,17 @@ class PostgresLoader:
                          observed_value, threshold_value, details)
                     VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
                     """,
-                    (str(batch_id), layer, entity, item.name, item.severity,
-                     item.passed, item.observed_value, item.threshold_value,
-                     item.details),
+                    (
+                        str(batch_id),
+                        layer,
+                        entity,
+                        item.name,
+                        item.severity,
+                        item.passed,
+                        item.observed_value,
+                        item.threshold_value,
+                        item.details,
+                    ),
                 )
 
     # ------------------------------------------------------------------
@@ -297,8 +353,11 @@ class PostgresLoader:
         connection = self.connect()
         schema_name, table_name = table.split(".", 1)
         with connection.cursor() as cursor:
-            cursor.execute(sql.SQL("SELECT count(*) FROM {}.{}").format(
-                sql.Identifier(schema_name), sql.Identifier(table_name)))
+            cursor.execute(
+                sql.SQL("SELECT count(*) FROM {}.{}").format(
+                    sql.Identifier(schema_name), sql.Identifier(table_name)
+                )
+            )
             count = int(cursor.fetchone()[0])
         connection.commit()
         return count
@@ -312,10 +371,15 @@ class PostgresLoader:
                 SELECT slot_name, active, restart_lsn,
                        pg_wal_lsn_diff(pg_current_wal_lsn(), restart_lsn) AS lag_bytes
                   FROM pg_replication_slots
-                """)
+                """
+            )
             rows = [
-                {"slot_name": r[0], "active": r[1], "restart_lsn": str(r[2]),
-                 "lag_bytes": int(r[3] or 0)}
+                {
+                    "slot_name": r[0],
+                    "active": r[1],
+                    "restart_lsn": str(r[2]),
+                    "lag_bytes": int(r[3] or 0),
+                }
                 for r in cursor.fetchall()
             ]
         connection.commit()
@@ -325,8 +389,7 @@ class PostgresLoader:
         """Advance the CDC heartbeat so an idle slot still confirms an LSN."""
         connection = self.connect()
         with connection.cursor() as cursor:
-            cursor.execute(
-                "UPDATE cdc.debezium_heartbeat SET beat_at = now() WHERE id = 1")
+            cursor.execute("UPDATE cdc.debezium_heartbeat SET beat_at = now() WHERE id = 1")
         connection.commit()
 
 

@@ -37,8 +37,7 @@ NAMESPACE = "fineract_ingest"
 class IngestionMetrics:
     """One registry per process; pushed once at the end of the run."""
 
-    def __init__(self, pushgateway_url: str = "", enabled: bool = True,
-                 environment: str = "local"):
+    def __init__(self, pushgateway_url: str = "", enabled: bool = True, environment: str = "local"):
         self.registry = CollectorRegistry()
         self.pushgateway_url = pushgateway_url
         self.enabled = enabled and bool(pushgateway_url)
@@ -48,67 +47,109 @@ class IngestionMetrics:
 
         self.rows_read = Counter(
             f"{NAMESPACE}_rows_read_total",
-            "Records read from the Fineract API.", labels, registry=self.registry)
+            "Records read from the Fineract API.",
+            labels,
+            registry=self.registry,
+        )
         self.rows_inserted = Counter(
             f"{NAMESPACE}_rows_inserted_total",
-            "Records inserted into the OLTP landing tables.", labels,
-            registry=self.registry)
+            "Records inserted into the OLTP landing tables.",
+            labels,
+            registry=self.registry,
+        )
         self.rows_updated = Counter(
             f"{NAMESPACE}_rows_updated_total",
-            "Records whose payload changed and were updated.", labels,
-            registry=self.registry)
+            "Records whose payload changed and were updated.",
+            labels,
+            registry=self.registry,
+        )
         self.rows_unchanged = Counter(
             f"{NAMESPACE}_rows_unchanged_total",
-            "Records skipped because the payload hash was identical "
-            "(no WAL, no CDC event).", labels, registry=self.registry)
+            "Records skipped because the payload hash was identical (no WAL, no CDC event).",
+            labels,
+            registry=self.registry,
+        )
         self.rows_rejected = Counter(
             f"{NAMESPACE}_rows_rejected_total",
-            "Records quarantined in meta.ingestion_reject.", labels,
-            registry=self.registry)
+            "Records quarantined in meta.ingestion_reject.",
+            labels,
+            registry=self.registry,
+        )
 
         self.runs_total = Counter(
-            f"{NAMESPACE}_runs_total", "Ingestion runs by outcome.",
-            labels + ["status"], registry=self.registry)
+            f"{NAMESPACE}_runs_total",
+            "Ingestion runs by outcome.",
+            labels + ["status"],
+            registry=self.registry,
+        )
 
         self.duration = Histogram(
-            f"{NAMESPACE}_duration_seconds", "Wall-clock duration of an entity load.",
-            labels, registry=self.registry,
-            buckets=(1, 5, 15, 30, 60, 120, 300, 600, 1800, 3600))
+            f"{NAMESPACE}_duration_seconds",
+            "Wall-clock duration of an entity load.",
+            labels,
+            registry=self.registry,
+            buckets=(1, 5, 15, 30, 60, 120, 300, 600, 1800, 3600),
+        )
 
         self.api_requests = Counter(
-            f"{NAMESPACE}_api_requests_total", "HTTP requests issued to Fineract.",
-            labels, registry=self.registry)
+            f"{NAMESPACE}_api_requests_total",
+            "HTTP requests issued to Fineract.",
+            labels,
+            registry=self.registry,
+        )
         self.api_retries = Counter(
-            f"{NAMESPACE}_api_retries_total", "HTTP requests retried.", labels,
-            registry=self.registry)
+            f"{NAMESPACE}_api_retries_total",
+            "HTTP requests retried.",
+            labels,
+            registry=self.registry,
+        )
         self.api_latency = Histogram(
             f"{NAMESPACE}_api_request_duration_seconds",
-            "Mean Fineract response latency observed during the run.", labels,
+            "Mean Fineract response latency observed during the run.",
+            labels,
             registry=self.registry,
-            buckets=(0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30, 60))
+            buckets=(0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30, 60),
+        )
 
         self.last_success = Gauge(
             f"{NAMESPACE}_last_success_timestamp_seconds",
             "Unix timestamp of the last successful load - freshness alerts key off this.",
-            labels, registry=self.registry)
+            labels,
+            registry=self.registry,
+        )
         self.expectation_failures = Gauge(
             f"{NAMESPACE}_expectation_failures",
             "Failing data-quality expectations in the last run.",
-            labels + ["severity"], registry=self.registry)
+            labels + ["severity"],
+            registry=self.registry,
+        )
         self.table_rows = Gauge(
             f"{NAMESPACE}_table_rows",
-            "Row count of the landing table after the load.", labels,
-            registry=self.registry)
+            "Row count of the landing table after the load.",
+            labels,
+            registry=self.registry,
+        )
 
     # ------------------------------------------------------------------
     def _labels(self, entity: str) -> dict[str, str]:
         return {"entity": entity, "environment": self.environment}
 
-    def record_load(self, entity: str, *, rows_read: int, rows_inserted: int,
-                    rows_updated: int, rows_unchanged: int, rows_rejected: int,
-                    duration_seconds: float, api_requests: int, api_retries: int,
-                    mean_latency_seconds: float, status: str,
-                    table_rows: int | None = None) -> None:
+    def record_load(
+        self,
+        entity: str,
+        *,
+        rows_read: int,
+        rows_inserted: int,
+        rows_updated: int,
+        rows_unchanged: int,
+        rows_rejected: int,
+        duration_seconds: float,
+        api_requests: int,
+        api_retries: int,
+        mean_latency_seconds: float,
+        status: str,
+        table_rows: int | None = None,
+    ) -> None:
         labels = self._labels(entity)
         self.rows_read.labels(**labels).inc(rows_read)
         self.rows_inserted.labels(**labels).inc(rows_inserted)
