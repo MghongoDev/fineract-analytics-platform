@@ -134,7 +134,10 @@ services:
     ports:
       - "${FINERACT_MOCK_PORT:-8090}:8090"
     healthcheck:
-      test: ["CMD-SHELL", "python -c \"import urllib.request;urllib.request.urlopen('http://localhost:8090/fineract-provider/api/v1/actuator/health')\""]
+      test:
+        - CMD-SHELL
+        - >-
+          python -c "import urllib.request;urllib.request.urlopen('http://localhost:8090/fineract-provider/api/v1/actuator/health')"
       interval: 10s
       timeout: 5s
       retries: 10
@@ -210,7 +213,12 @@ services:
     volumes:
       - kafka-data:/var/lib/kafka/data
     healthcheck:
-      test: ["CMD-SHELL", "kafka-metadata --bootstrap-server kafka:29092 --list 2>&1 | grep -q 'ClusterId' || kafka-broker-api-versions --bootstrap-server kafka:29092 2>&1 | grep -q 'kafka:29092'"]
+      test:
+        - CMD-SHELL
+        - >-
+          kafka-metadata --bootstrap-server kafka:29092 --list 2>&1 | grep -q
+          'ClusterId' || kafka-broker-api-versions --bootstrap-server kafka:29092 2>&1 | grep -q
+          'kafka:29092'
       interval: 15s
       timeout: 10s
       retries: 20
@@ -272,6 +280,8 @@ services:
   # One-shot job: registers the Debezium connector idempotently.
   # Runs as part of `make up` so the CDC path is live without a manual
   # curl, and re-running it reconciles the connector with what is in git.
+  # no-healthcheck: exits after registering, so a healthcheck would never
+  # be reported healthy; readiness is `depends_on: service_completed_successfully`.
   cdc-register:
     image: python:3.11-slim
     depends_on:
@@ -290,6 +300,9 @@ services:
     logging: *default-logging
     networks: [fineract-net]
 
+# Optional web UI for poking at Kafka/Connect by hand (profile: tools).
+  # no-healthcheck: interactive debugging tool, not part of the core
+  # pipeline; liveness is up to the person running `make ui`.
   kafka-ui:
     image: provectuslabs/kafka-ui:latest
     profiles: [tools]
@@ -332,7 +345,7 @@ services:
       - "${CLICKHOUSE_NATIVE_PORT:-9000}:9000"
       - "9363:9363"    # native Prometheus endpoint
     ulimits:
-      nofile: { soft: 262144, hard: 262144 }
+      nofile: {soft: 262144, hard: 262144}
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://localhost:8123/ping | grep -q Ok"]
       interval: 10s
@@ -344,6 +357,8 @@ services:
 
   # ===================================================================
   # INGESTION (manual / invoked by Airflow)
+  # no-healthcheck: idle container started only to be invoked on demand
+  # (make ingest / Airflow DAG); liveness is the runner's job, not a probe.
   # ===================================================================
   ingestion:
     build:
@@ -383,6 +398,9 @@ services:
     logging: *default-logging
     networks: [fineract-net]
 
+  # One-shot init: applies Airflow DB migrations and creates the admin user.
+  # no-healthcheck: exits once done; the scheduler/webserver chain off
+  # `service_completed_successfully` rather than a health probe.
   airflow-init:
     <<: *airflow-common
     depends_on:
@@ -436,6 +454,8 @@ services:
 
   # Interactive dbt shell for ad-hoc work: `make dbt-run`, `docker
   # compose run --rm dbt run --select tag:marts`, etc.
+  # no-healthcheck: launched on demand via `compose run` and exits with the
+  # command; not a long-running service to probe.
   dbt:
     <<: *airflow-common
     profiles: [tools]
@@ -525,6 +545,11 @@ services:
       - ./observability/statsd:/etc/statsd:ro
     ports:
       - "9102:9102"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:9102/metrics >/dev/null 2>&1 || exit 1"]
+      interval: 20s
+      timeout: 10s
+      retries: 10
     logging: *default-logging
     networks: [fineract-net]
 
@@ -533,8 +558,13 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:9187/metrics >/dev/null 2>&1 || exit 1"]
+      interval: 20s
+      timeout: 10s
+      retries: 10
     environment:
-      DATA_SOURCE_NAME: "postgresql://${POSTGRES_SUPERUSER:-postgres}:${POSTGRES_SUPERUSER_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-fineract_oltp}?sslmode=disable"
+      DATA_SOURCE_NAME: "postgresql://${POSTGRES_SUPERUSER:-postgres}:${POSTGRES_SUPERUSER_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-fineract_oltp}?sslmode=disable"  # yamllint disable-line rule:line-length
       PG_EXPORTER_AUTO_DISCOVER_DATABASES: "false"
     ports:
       - "9187:9187"
@@ -559,6 +589,11 @@ services:
       - /:/host/root:ro
     ports:
       - "9100:9100"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:9100/metrics >/dev/null 2>&1 || exit 1"]
+      interval: 20s
+      timeout: 10s
+      retries: 10
     logging: *default-logging
     networks: [fineract-net]
 
@@ -570,6 +605,11 @@ services:
     command: ["--kafka.server=kafka:29092"]
     ports:
       - "9308:9308"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:9308/metrics >/dev/null 2>&1 || exit 1"]
+      interval: 20s
+      timeout: 10s
+      retries: 10
     # The kafka healthcheck can pass a beat before the PLAINTEXT broker
     # listener accepts connections, so the first start sometimes dies with
     # "client has run out of available brokers". Restarting recovers it.
