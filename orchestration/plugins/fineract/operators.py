@@ -35,18 +35,20 @@ class DbtOperator(BaseOperator):
     ui_color = "#ff7043"
     template_fields: Sequence[str] = ("select", "exclude", "vars", "full_refresh")
 
-    def __init__(self,
-                 command: str = "run",
-                 select: str | None = None,
-                 exclude: str | None = None,
-                 vars: dict | None = None,      # noqa: A002 - dbt's own name
-                 full_refresh: bool = False,
-                 target: str | None = None,
-                 fail_fast: bool = False,
-                 warn_error: bool = False,
-                 project_dir: str = DBT_PROJECT_DIR,
-                 profiles_dir: str = DBT_PROFILES_DIR,
-                 **kwargs: Any):
+    def __init__(
+        self,
+        command: str = "run",
+        select: str | None = None,
+        exclude: str | None = None,
+        vars: dict | None = None,  # noqa: A002 - dbt's own name
+        full_refresh: bool = False,
+        target: str | None = None,
+        fail_fast: bool = False,
+        warn_error: bool = False,
+        project_dir: str = DBT_PROJECT_DIR,
+        profiles_dir: str = DBT_PROFILES_DIR,
+        **kwargs: Any,
+    ):
         super().__init__(**kwargs)
         self.command = command
         self.select = select
@@ -60,10 +62,17 @@ class DbtOperator(BaseOperator):
         self.profiles_dir = profiles_dir
 
     def _build_command(self) -> list[str]:
-        argv = ["dbt", "--no-use-colors", self.command,
-                "--project-dir", self.project_dir,
-                "--profiles-dir", self.profiles_dir,
-                "--target", self.target]
+        argv = [
+            "dbt",
+            "--no-use-colors",
+            self.command,
+            "--project-dir",
+            self.project_dir,
+            "--profiles-dir",
+            self.profiles_dir,
+            "--target",
+            self.target,
+        ]
         if self.select:
             argv += ["--select", self.select]
         if self.exclude:
@@ -83,8 +92,13 @@ class DbtOperator(BaseOperator):
         self.log.info("running: %s", " ".join(argv))
 
         process = subprocess.Popen(
-            argv, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-            text=True, bufsize=1, env={**os.environ})
+            argv,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            bufsize=1,
+            env={**os.environ},
+        )
         assert process.stdout is not None
         for line in process.stdout:
             self.log.info(line.rstrip())
@@ -94,8 +108,7 @@ class DbtOperator(BaseOperator):
         self.log.info("dbt summary: %s", json.dumps(summary))
 
         if return_code != 0:
-            raise AirflowFailException(
-                f"dbt {self.command} exited {return_code}: {summary}")
+            raise AirflowFailException(f"dbt {self.command} exited {return_code}: {summary}")
 
         # Push to XCom so the quality gate and the metrics publisher can
         # read the outcome without re-parsing the artefacts.
@@ -118,8 +131,9 @@ class DbtOperator(BaseOperator):
             "error": sum(1 for r in results if r.get("status") in ("error", "fail")),
             "skipped": sum(1 for r in results if r.get("status") == "skipped"),
             "elapsed": round(payload.get("elapsed_time", 0), 2),
-            "failed_nodes": [r.get("unique_id") for r in results
-                             if r.get("status") in ("error", "fail")][:20],
+            "failed_nodes": [
+                r.get("unique_id") for r in results if r.get("status") in ("error", "fail")
+            ][:20],
         }
 
 
@@ -181,7 +195,8 @@ class PublishDbtResultsOperator(BaseOperator):
                     f"'{self._escape(unique_id)}', '{self._escape(name)}', "
                     f"'{self._escape(name)}', '{layer}', '{status}', "
                     f"'{result.get('failures') is not None and 'error' or 'error'}', "
-                    f"{int(result.get('failures') or 0)}, {timing}, '{message}')")
+                    f"{int(result.get('failures') or 0)}, {timing}, '{message}')"
+                )
             else:
                 model_rows.append(
                     f"('{invocation_id}', '{dag_run_id}', '{executed_at}', "
@@ -190,7 +205,8 @@ class PublishDbtResultsOperator(BaseOperator):
                     f"'{self._escape(result.get('adapter_response', {}).get('materialization', ''))}', "  # noqa: E501
                     f"'{status}', "
                     f"{int(result.get('adapter_response', {}).get('rows_affected') or 0)}, "
-                    f"{timing}, '{message}')")
+                    f"{timing}, '{message}')"
+                )
 
         clickhouse = ClickHouseHook(database="fineract_ops")
         if test_rows:
@@ -198,16 +214,21 @@ class PublishDbtResultsOperator(BaseOperator):
                 "INSERT INTO fineract_ops.dbt_test_results "
                 "(invocation_id, dag_run_id, executed_at, node_id, test_name, "
                 " model_name, layer, status, severity, failures, execution_time, message) "
-                "VALUES " + ", ".join(test_rows))
+                "VALUES " + ", ".join(test_rows)
+            )
         if model_rows:
             clickhouse.execute(
                 "INSERT INTO fineract_ops.dbt_model_runs "
                 "(invocation_id, dag_run_id, executed_at, node_id, model_name, "
                 " layer, materialization, status, rows_affected, execution_time, message) "
-                "VALUES " + ", ".join(model_rows))
+                "VALUES " + ", ".join(model_rows)
+            )
 
-        summary = {"tests_published": len(test_rows), "models_published": len(model_rows),
-                   "invocation_id": invocation_id}
+        summary = {
+            "tests_published": len(test_rows),
+            "models_published": len(model_rows),
+            "invocation_id": invocation_id,
+        }
         self.log.info("published dbt artefacts: %s", json.dumps(summary))
         return summary
 
@@ -228,26 +249,52 @@ class DataQualityGateOperator(BaseOperator):
 
     #: (name, query returning a single number, comparison, threshold, blocking)
     DEFAULT_CHECKS: tuple[tuple[str, str, str, float, bool], ...] = (
-        ("marts_not_empty",
-         "SELECT count() FROM fineract_marts.fct_loan", ">", 0, True),
-        ("no_duplicate_loans",
-         "SELECT count() - countDistinct(loan_id) FROM fineract_marts.fct_loan",
-         "==", 0, True),
-        ("no_duplicate_transactions",
-         "SELECT count() - countDistinct(transaction_id) "
-         "FROM fineract_marts.fct_loan_transaction", "==", 0, True),
-        ("no_negative_outstanding",
-         "SELECT countIf(total_outstanding < 0) FROM fineract_marts.fct_loan",
-         "==", 0, True),
-        ("cdc_parse_errors",
-         "SELECT count() FROM fineract_raw.cdc_errors "
-         "WHERE observed_at > now() - INTERVAL 1 DAY", "==", 0, False),
-        ("ml_label_leakage",
-         "SELECT countIf(feat_days_since_prior_loan <= 0) "
-         "FROM fineract_ml.ml_loan_default_features", "==", 0, True),
-        ("dimension_coverage",
-         "SELECT countIf(client_segment = '') FROM fineract_marts.fct_loan",
-         "==", 0, False),
+        ("marts_not_empty", "SELECT count() FROM fineract_marts.fct_loan", ">", 0, True),
+        (
+            "no_duplicate_loans",
+            "SELECT count() - countDistinct(loan_id) FROM fineract_marts.fct_loan",
+            "==",
+            0,
+            True,
+        ),
+        (
+            "no_duplicate_transactions",
+            "SELECT count() - countDistinct(transaction_id) "
+            "FROM fineract_marts.fct_loan_transaction",
+            "==",
+            0,
+            True,
+        ),
+        (
+            "no_negative_outstanding",
+            "SELECT countIf(total_outstanding < 0) FROM fineract_marts.fct_loan",
+            "==",
+            0,
+            True,
+        ),
+        (
+            "cdc_parse_errors",
+            "SELECT count() FROM fineract_raw.cdc_errors "
+            "WHERE observed_at > now() - INTERVAL 1 DAY",
+            "==",
+            0,
+            False,
+        ),
+        (
+            "ml_label_leakage",
+            "SELECT countIf(feat_days_since_prior_loan <= 0) "
+            "FROM fineract_ml.ml_loan_default_features",
+            "==",
+            0,
+            True,
+        ),
+        (
+            "dimension_coverage",
+            "SELECT countIf(client_segment = '') FROM fineract_marts.fct_loan",
+            "==",
+            0,
+            False,
+        ),
     )
 
     def __init__(self, checks: Sequence[tuple] | None = None, **kwargs: Any):
@@ -275,21 +322,36 @@ class DataQualityGateOperator(BaseOperator):
                 "<=": observed <= threshold,
             }[comparison]
 
-            results.append({"check": name, "observed": observed,
-                            "expected": f"{comparison} {threshold}",
-                            "status": "pass" if passed else "fail",
-                            "blocking": blocking})
+            results.append(
+                {
+                    "check": name,
+                    "observed": observed,
+                    "expected": f"{comparison} {threshold}",
+                    "status": "pass" if passed else "fail",
+                    "blocking": blocking,
+                }
+            )
             level = self.log.info if passed else self.log.error
-            level("quality check %-28s observed=%s expected %s %s -> %s",
-                  name, observed, comparison, threshold, "PASS" if passed else "FAIL")
+            level(
+                "quality check %-28s observed=%s expected %s %s -> %s",
+                name,
+                observed,
+                comparison,
+                threshold,
+                "PASS" if passed else "FAIL",
+            )
             if not passed and blocking:
                 blocking_failures.append(
-                    f"{name}: observed {observed}, expected {comparison} {threshold}")
+                    f"{name}: observed {observed}, expected {comparison} {threshold}"
+                )
 
         if blocking_failures:
             raise AirflowFailException(
-                "blocking data-quality failures:\n  - " + "\n  - ".join(blocking_failures))
+                "blocking data-quality failures:\n  - " + "\n  - ".join(blocking_failures)
+            )
 
-        return {"checks": results,
-                "passed": sum(1 for r in results if r["status"] == "pass"),
-                "failed": sum(1 for r in results if r["status"] != "pass")}
+        return {
+            "checks": results,
+            "passed": sum(1 for r in results if r["status"] == "pass"),
+            "failed": sum(1 for r in results if r["status"] != "pass"),
+        }

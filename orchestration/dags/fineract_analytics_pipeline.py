@@ -75,8 +75,14 @@ try:
     from fineract_ingest.entities import DEFAULT_ORDER as INGEST_ENTITIES
 except ImportError:  # pragma: no cover
     INGEST_ENTITIES = (
-        "offices", "staff", "loan_products", "savings_products",
-        "clients", "loans", "savings_accounts", "loan_transactions",
+        "offices",
+        "staff",
+        "loan_products",
+        "savings_products",
+        "clients",
+        "loans",
+        "savings_accounts",
+        "loan_transactions",
     )
 
 #: Entities whose CDC delivery gates the transformation layer. The
@@ -148,7 +154,6 @@ with DAG(
         "skip_cdc_gate": False,
     },
 ) as dag:
-
     start = EmptyOperator(task_id="start")
 
     # -----------------------------------------------------------------
@@ -156,19 +161,34 @@ with DAG(
     # -----------------------------------------------------------------
     with TaskGroup("preflight", tooltip="Platform reachability checks") as preflight:
         check_fineract = ServiceHealthSensor(
-            task_id="check_fineract_api", service="fineract",
-            poke_interval=30, timeout=600, mode="reschedule")
+            task_id="check_fineract_api",
+            service="fineract",
+            poke_interval=30,
+            timeout=600,
+            mode="reschedule",
+        )
         check_postgres = ServiceHealthSensor(
-            task_id="check_postgres", service="postgres",
-            poke_interval=15, timeout=300, mode="reschedule")
+            task_id="check_postgres",
+            service="postgres",
+            poke_interval=15,
+            timeout=300,
+            mode="reschedule",
+        )
         check_clickhouse = ServiceHealthSensor(
-            task_id="check_clickhouse", service="clickhouse",
-            poke_interval=15, timeout=300, mode="reschedule")
+            task_id="check_clickhouse",
+            service="clickhouse",
+            poke_interval=15,
+            timeout=300,
+            mode="reschedule",
+        )
         check_connector = KafkaConnectorHealthSensor(
             task_id="check_debezium_connector",
             connector_name="fineract-oltp-source",
             restart_failed=True,
-            poke_interval=20, timeout=600, mode="reschedule")
+            poke_interval=20,
+            timeout=600,
+            mode="reschedule",
+        )
 
     # -----------------------------------------------------------------
     # 2. Ingest - one task per entity, generated from the registry.
@@ -220,16 +240,17 @@ with DAG(
         dbt_seed = DbtOperator(task_id="dbt_seed", command="seed")
 
         dbt_staging = DbtOperator(
-            task_id="dbt_run_staging", command="run",
+            task_id="dbt_run_staging",
+            command="run",
             select="tag:staging",
             full_refresh="{{ params.full_refresh }}",
-            execution_timeout=timedelta(minutes=60))
+            execution_timeout=timedelta(minutes=60),
+        )
         dbt_intermediate = DbtOperator(
-            task_id="dbt_run_intermediate", command="run", select="tag:intermediate")
-        dbt_marts = DbtOperator(
-            task_id="dbt_run_marts", command="run", select="tag:marts")
-        dbt_ml = DbtOperator(
-            task_id="dbt_run_ml", command="run", select="tag:ml")
+            task_id="dbt_run_intermediate", command="run", select="tag:intermediate"
+        )
+        dbt_marts = DbtOperator(task_id="dbt_run_marts", command="run", select="tag:marts")
+        dbt_ml = DbtOperator(task_id="dbt_run_ml", command="run", select="tag:ml")
 
         dbt_deps >> dbt_seed >> dbt_staging >> dbt_intermediate >> dbt_marts >> dbt_ml
 
@@ -241,11 +262,14 @@ with DAG(
         # pipeline failure, and paging on it trains people to ignore
         # pages. The CDC gate above is the hard freshness guarantee.
         dbt_freshness = DbtOperator(
-            task_id="dbt_source_freshness", command="source freshness",
-            retries=0, trigger_rule=TriggerRule.ALL_DONE)
+            task_id="dbt_source_freshness",
+            command="source freshness",
+            retries=0,
+            trigger_rule=TriggerRule.ALL_DONE,
+        )
         dbt_test = DbtOperator(
-            task_id="dbt_test", command="test",
-            execution_timeout=timedelta(minutes=30))
+            task_id="dbt_test", command="test", execution_timeout=timedelta(minutes=30)
+        )
 
         dbt_freshness >> dbt_test
 
@@ -254,8 +278,8 @@ with DAG(
     # -----------------------------------------------------------------
     publish_results = PublishDbtResultsOperator(
         task_id="publish_dbt_results",
-        trigger_rule=TriggerRule.ALL_DONE,   # a failed test is exactly when
-        retries=1,                            # you most want the history
+        trigger_rule=TriggerRule.ALL_DONE,  # a failed test is exactly when
+        retries=1,  # you most want the history
     )
 
     @task(task_id="publish_pipeline_metrics", trigger_rule=TriggerRule.ALL_DONE)
@@ -264,23 +288,38 @@ with DAG(
         from prometheus_client import CollectorRegistry, Gauge, push_to_gateway
 
         dag_run = context["dag_run"]
-        duration = ((dag_run.end_date or datetime.utcnow()) - dag_run.start_date
-                    ).total_seconds() if dag_run.start_date else 0
-        failed = [ti.task_id for ti in dag_run.get_task_instances()
-                  if ti.state == "failed"]
+        duration = (
+            ((dag_run.end_date or datetime.utcnow()) - dag_run.start_date).total_seconds()
+            if dag_run.start_date
+            else 0
+        )
+        failed = [ti.task_id for ti in dag_run.get_task_instances() if ti.state == "failed"]
 
         registry = CollectorRegistry()
-        Gauge("fineract_pipeline_duration_seconds", "Pipeline wall clock",
-              ["dag_id"], registry=registry).labels(dag_id=dag_run.dag_id).set(duration)
-        Gauge("fineract_pipeline_failed_tasks", "Failed tasks in the last run",
-              ["dag_id"], registry=registry).labels(dag_id=dag_run.dag_id).set(len(failed))
-        Gauge("fineract_pipeline_last_run_timestamp_seconds", "Last run finish time",
-              ["dag_id"], registry=registry).labels(
-                  dag_id=dag_run.dag_id).set(datetime.utcnow().timestamp())
+        Gauge(
+            "fineract_pipeline_duration_seconds",
+            "Pipeline wall clock",
+            ["dag_id"],
+            registry=registry,
+        ).labels(dag_id=dag_run.dag_id).set(duration)
+        Gauge(
+            "fineract_pipeline_failed_tasks",
+            "Failed tasks in the last run",
+            ["dag_id"],
+            registry=registry,
+        ).labels(dag_id=dag_run.dag_id).set(len(failed))
+        Gauge(
+            "fineract_pipeline_last_run_timestamp_seconds",
+            "Last run finish time",
+            ["dag_id"],
+            registry=registry,
+        ).labels(dag_id=dag_run.dag_id).set(datetime.utcnow().timestamp())
         try:
             push_to_gateway(
                 os.environ.get("PROMETHEUS_PUSHGATEWAY_URL", "http://pushgateway:9091"),
-                job="fineract_pipeline", registry=registry)
+                job="fineract_pipeline",
+                registry=registry,
+            )
         except Exception as exc:  # noqa: BLE001 - telemetry must not fail the run
             print(f"metric push failed: {exc}")
         return {"duration_seconds": duration, "failed_tasks": failed}

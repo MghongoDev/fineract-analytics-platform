@@ -63,7 +63,7 @@ with DAG(
     dag_id="platform_maintenance",
     description="CDC heartbeat, slot lag, ClickHouse merges and retention",
     default_args=default_args,
-    schedule="15 * * * *",          # hourly, offset so it never collides
+    schedule="15 * * * *",  # hourly, offset so it never collides
     start_date=datetime(2026, 1, 1),  # with the 4-hourly pipeline run
     catchup=False,
     max_active_runs=1,
@@ -75,7 +75,6 @@ with DAG(
         "optimize_tables": Param(True, type="boolean"),
     },
 ) as dag:
-
     start = EmptyOperator(task_id="start")
 
     @task(task_id="cdc_heartbeat")
@@ -96,19 +95,20 @@ with DAG(
                    pg_wal_lsn_diff(pg_current_wal_lsn(), restart_lsn) AS lag_bytes,
                    pg_size_pretty(pg_wal_lsn_diff(pg_current_wal_lsn(), restart_lsn))
               FROM pg_replication_slots
-            """)
+            """
+        )
         if not rows:
             raise RuntimeError(
                 "no replication slots exist - the Debezium connector is not "
-                "streaming. Nothing has reached ClickHouse since it stopped.")
+                "streaming. Nothing has reached ClickHouse since it stopped."
+            )
 
         report = []
         problems = []
         for slot_name, active, plugin, lag_bytes, lag_pretty in rows:
             lag_bytes = int(lag_bytes or 0)
             print(f"slot={slot_name} plugin={plugin} active={active} lag={lag_pretty}")
-            report.append({"slot": slot_name, "active": bool(active),
-                           "lag_bytes": lag_bytes})
+            report.append({"slot": slot_name, "active": bool(active), "lag_bytes": lag_bytes})
             if not active:
                 problems.append(f"{slot_name} is INACTIVE - WAL is accumulating")
             if lag_bytes > SLOT_LAG_FAIL_BYTES:
@@ -146,17 +146,25 @@ with DAG(
             return {"skipped": True}
 
         clickhouse = ClickHouseHook()
-        tables = ["offices", "staff", "loan_products", "savings_products",
-                  "clients", "savings_accounts"]
+        tables = [
+            "offices",
+            "staff",
+            "loan_products",
+            "savings_products",
+            "clients",
+            "savings_accounts",
+        ]
         optimized = {}
         for table in tables:
             before = clickhouse.scalar(
                 f"SELECT count() FROM system.parts "
-                f"WHERE active AND database = 'fineract_raw' AND table = '{table}'")
+                f"WHERE active AND database = 'fineract_raw' AND table = '{table}'"
+            )
             clickhouse.execute(f"OPTIMIZE TABLE fineract_raw.{table} FINAL")
             after = clickhouse.scalar(
                 f"SELECT count() FROM system.parts "
-                f"WHERE active AND database = 'fineract_raw' AND table = '{table}'")
+                f"WHERE active AND database = 'fineract_raw' AND table = '{table}'"
+            )
             optimized[table] = {"parts_before": before, "parts_after": after}
             print(f"optimized fineract_raw.{table}: {before} -> {after} parts")
         return optimized
@@ -167,15 +175,17 @@ with DAG(
         rows = clickhouse.query_json(
             "SELECT database, table, active_parts, total_rows, size_mb, "
             "compression_ratio FROM fineract_ops.v_merge_health "
-            "ORDER BY active_parts DESC LIMIT 20")
+            "ORDER BY active_parts DESC LIMIT 20"
+        )
         for row in rows:
-            print(f"{row['database']}.{row['table']}: {row['active_parts']} parts, "
-                  f"{row['total_rows']} rows, {row['size_mb']} MB, "
-                  f"x{row['compression_ratio']} compression")
+            print(
+                f"{row['database']}.{row['table']}: {row['active_parts']} parts, "
+                f"{row['total_rows']} rows, {row['size_mb']} MB, "
+                f"x{row['compression_ratio']} compression"
+            )
         hot = [r for r in rows if int(r["active_parts"]) > 300]
         if hot:
-            print(f"WARNING: tables with excessive parts: "
-                  f"{[r['table'] for r in hot]}")
+            print(f"WARNING: tables with excessive parts: {[r['table'] for r in hot]}")
         return {"tables": rows, "over_threshold": [r["table"] for r in hot]}
 
     @task(task_id="apply_retention")
@@ -188,18 +198,20 @@ with DAG(
         rejects = postgres.query(
             "DELETE FROM meta.ingestion_reject "
             "WHERE rejected_at < now() - make_interval(days => %s) RETURNING 1",
-            (reject_days,))
+            (reject_days,),
+        )
         runs = postgres.query(
             "DELETE FROM meta.ingestion_run "
             "WHERE started_at < now() - make_interval(days => %s) RETURNING 1",
-            (run_days,))
+            (run_days,),
+        )
         quality = postgres.query(
             "DELETE FROM meta.data_quality_result "
             "WHERE checked_at < now() - make_interval(days => %s) RETURNING 1",
-            (run_days,))
+            (run_days,),
+        )
 
-        removed = {"rejects": len(rejects), "runs": len(runs),
-                   "quality_results": len(quality)}
+        removed = {"rejects": len(rejects), "runs": len(runs), "quality_results": len(quality)}
         print(f"retention removed: {removed}")
         return removed
 
@@ -212,7 +224,8 @@ with DAG(
             "SELECT entity, rule, count(*) "
             "FROM meta.ingestion_reject "
             "WHERE rejected_at > now() - interval '24 hours' "
-            "GROUP BY entity, rule ORDER BY count(*) DESC")
+            "GROUP BY entity, rule ORDER BY count(*) DESC"
+        )
         summary = [{"entity": r[0], "rule": r[1], "count": int(r[2])} for r in rows]
         for item in summary:
             print(f"rejects last 24h: {item['entity']} / {item['rule']}: {item['count']}")

@@ -61,14 +61,15 @@ def dagbag() -> DagBag:
 
 
 def test_no_import_errors(dagbag: DagBag) -> None:
-    assert not dagbag.import_errors, (
-        "DAG import failures:\n"
-        + "\n".join(f"{path}: {error}" for path, error in dagbag.import_errors.items()))
+    assert not dagbag.import_errors, "DAG import failures:\n" + "\n".join(
+        f"{path}: {error}" for path, error in dagbag.import_errors.items()
+    )
 
 
 def test_expected_dags_are_present(dagbag: DagBag) -> None:
     assert EXPECTED_DAGS.issubset(set(dagbag.dag_ids)), (
-        f"missing DAGs: {EXPECTED_DAGS - set(dagbag.dag_ids)}")
+        f"missing DAGs: {EXPECTED_DAGS - set(dagbag.dag_ids)}"
+    )
 
 
 @pytest.mark.parametrize("dag_id", sorted(EXPECTED_DAGS))
@@ -84,7 +85,8 @@ def test_tasks_have_retries_and_owner(dagbag: DagBag, dag_id: str) -> None:
     dag = _dag(dagbag, dag_id)
     for task in dag.tasks:
         assert task.owner not in (None, "", "airflow"), (
-            f"{dag_id}.{task.task_id} has the default owner - nobody is on the hook")
+            f"{dag_id}.{task.task_id} has the default owner - nobody is on the hook"
+        )
         # A quality gate is deliberately retry-free: re-running an
         # assertion that just failed only wastes time. Compare on the
         # leaf name, because a task inside a TaskGroup is addressed as
@@ -93,7 +95,8 @@ def test_tasks_have_retries_and_owner(dagbag: DagBag, dag_id: str) -> None:
         if leaf not in {"data_quality_gate", "dbt_source_freshness"}:
             assert task.retries >= 1, (
                 f"{dag_id}.{task.task_id} has no retries; transient failures "
-                f"in a distributed stack are normal")
+                f"in a distributed stack are normal"
+            )
 
 
 @pytest.mark.parametrize("dag_id", sorted(EXPECTED_DAGS))
@@ -111,7 +114,8 @@ def test_every_task_is_connected(dagbag: DagBag, dag_id: str) -> None:
         return
     for task in dag.tasks:
         assert task.upstream_list or task.downstream_list, (
-            f"{dag_id}.{task.task_id} is not connected to anything")
+            f"{dag_id}.{task.task_id} is not connected to anything"
+        )
 
 
 def test_pipeline_has_a_cdc_gate(dagbag: DagBag) -> None:
@@ -125,10 +129,12 @@ def test_pipeline_has_a_cdc_gate(dagbag: DagBag) -> None:
     upstream = {t.task_id for t in gate.upstream_list}
     downstream_ids = {t.task_id for t in gate.get_flat_relatives(upstream=False)}
 
-    assert any(task_id.startswith("ingest.") or task_id.startswith("ingest_")
-               for task_id in upstream), "the CDC gate must run after ingestion"
+    assert any(
+        task_id.startswith("ingest.") or task_id.startswith("ingest_") for task_id in upstream
+    ), "the CDC gate must run after ingestion"
     assert any("dbt_run" in task_id for task_id in downstream_ids), (
-        "every dbt run must be downstream of the CDC gate")
+        "every dbt run must be downstream of the CDC gate"
+    )
 
 
 def test_ingestion_tasks_match_the_entity_registry(dagbag: DagBag) -> None:
@@ -142,7 +148,8 @@ def test_ingestion_tasks_match_the_entity_registry(dagbag: DagBag) -> None:
     task_ids = {t.task_id.split(".")[-1] for t in dag.tasks}
     for entity in DEFAULT_ORDER:
         assert f"ingest_{entity}" in task_ids, (
-            f"entity '{entity}' is in the registry but has no ingestion task")
+            f"entity '{entity}' is in the registry but has no ingestion task"
+        )
 
 
 def test_pipeline_does_not_catch_up(dagbag: DagBag) -> None:
@@ -155,5 +162,4 @@ def test_pipeline_does_not_catch_up(dagbag: DagBag) -> None:
 
 def test_backfill_is_manual_only(dagbag: DagBag) -> None:
     dag = _dag(dagbag, "fineract_backfill")
-    assert dag.schedule_interval is None, (
-        "the backfill DAG must never run on a schedule")
+    assert dag.schedule_interval is None, "the backfill DAG must never run on a schedule"

@@ -56,8 +56,12 @@ class KafkaConnectorHealthSensor(BaseSensorOperator):
 
     ui_color = "#c5e5ff"
 
-    def __init__(self, connector_name: str = "fineract-oltp-source",
-                 restart_failed: bool = True, **kwargs: Any):
+    def __init__(
+        self,
+        connector_name: str = "fineract-oltp-source",
+        restart_failed: bool = True,
+        **kwargs: Any,
+    ):
         super().__init__(**kwargs)
         self.connector_name = connector_name
         self.restart_failed = restart_failed
@@ -109,10 +113,13 @@ class CDCCaughtUpSensor(BaseSensorOperator):
         "savings_products": ("oltp.savings_products", "savings_products"),
     }
 
-    def __init__(self, entities: Sequence[str] | None = None,
-                 row_tolerance: int = 0,
-                 max_lag_seconds: int = 300,
-                 **kwargs: Any):
+    def __init__(
+        self,
+        entities: Sequence[str] | None = None,
+        row_tolerance: int = 0,
+        max_lag_seconds: int = 300,
+        **kwargs: Any,
+    ):
         super().__init__(**kwargs)
         self.entities = list(entities or ["clients", "loans", "loan_transactions"])
         self.row_tolerance = row_tolerance
@@ -125,7 +132,8 @@ class CDCCaughtUpSensor(BaseSensorOperator):
         clickhouse_counts = {
             row["entity"]: int(row["live_keys"])
             for row in clickhouse.query_json(
-                "SELECT entity, live_keys FROM fineract_ops.v_reconciliation_counts")
+                "SELECT entity, live_keys FROM fineract_ops.v_reconciliation_counts"
+            )
         }
 
         caught_up = True
@@ -137,14 +145,19 @@ class CDCCaughtUpSensor(BaseSensorOperator):
             target_rows = clickhouse_counts.get(ch_entity, 0)
             delta = source_rows - target_rows
 
-            self.log.info("reconciliation %-18s postgres=%-8d clickhouse=%-8d delta=%d",
-                          entity, source_rows, target_rows, delta)
+            self.log.info(
+                "reconciliation %-18s postgres=%-8d clickhouse=%-8d delta=%d",
+                entity,
+                source_rows,
+                target_rows,
+                delta,
+            )
             if abs(delta) > self.row_tolerance:
                 caught_up = False
 
         freshness = clickhouse.query_json(
-            "SELECT source_table, freshness_seconds "
-            "FROM fineract_ops.v_cdc_freshness")
+            "SELECT source_table, freshness_seconds FROM fineract_ops.v_cdc_freshness"
+        )
         for row in freshness:
             seconds = float(row["freshness_seconds"])
             self.log.info("freshness %-18s %.0fs", row["source_table"], seconds)
@@ -170,7 +183,9 @@ class DataFreshnessSensor(BaseSensorOperator):
     def poke(self, context: Context) -> bool:
         age = PostgresHook().scalar(
             "SELECT EXTRACT(EPOCH FROM (now() - last_success_at)) "
-            "FROM meta.ingestion_watermark WHERE entity = %s", (self.entity,))
+            "FROM meta.ingestion_watermark WHERE entity = %s",
+            (self.entity,),
+        )
         if age is None:
             self.log.info("no watermark yet for %s", self.entity)
             return False
