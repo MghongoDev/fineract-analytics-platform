@@ -12,6 +12,18 @@
 <clickhouse>
 
     <!--
+      Bind every server to all IPv4 interfaces so the other stack
+      containers (Prometheus, Grafana datasource, dbt) can reach it - the
+      image's packaged default listens on loopback only. The IPv6 loopback
+      listener is kept as well: the docker container resolves `localhost`
+      to ::1 first, and the packaged healthcheck probes
+      http://localhost:8123/ping. (A `::` wildcard is not used - docker's
+      bridge network has no IPv6 and the interserver listener then fails.)
+    -->
+    <listen_host>0.0.0.0</listen_host>
+    <listen_host>::1</listen_host>
+
+    <!--
       Native Prometheus endpoint. ClickHouse can expose its own metrics
       without an exporter sidecar; `asynchronous_metrics` is what carries
       the numbers that actually predict trouble (parts counts, memory,
