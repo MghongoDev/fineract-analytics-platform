@@ -1,4 +1,10 @@
-# Kept separate from Airflow because dbt 1.8 requires protobuf 5 while
-# Airflow 2.10.5's OpenTelemetry packages require protobuf below 5.
-dbt-core==1.8.9
+# Exact pins for the dbt toolchain, kept as a reference alongside
+# orchestration/requirements.txt (which is the file the Docker image
+# actually installs).
+#
+# dbt-core 1.8.9+ requires protobuf >= 5, but the apache/airflow:2.10.5
+# base image's opentelemetry-proto 1.27.0 requires protobuf < 5. 1.8.8 is
+# the newest dbt-core that still accepts protobuf >= 4, < 5, so it is the
+# only version that resolves against that base image.
+dbt-core==1.8.8
 dbt-clickhouse==1.8.9
