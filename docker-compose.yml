@@ -219,7 +219,10 @@ services:
     networks: [fineract-net]
 
   kafka-connect:
-    image: debezium/connect:2.7.3.Final
+    build:
+      context: ./platform/kafka
+      dockerfile: Dockerfile
+    image: fineract-analytics/kafka-connect:latest
     depends_on:
       kafka:
         condition: service_healthy
@@ -247,9 +250,9 @@ services:
       DEBEZIUM_PASSWORD: ${DEBEZIUM_PASSWORD:-debezium}
       CONNECT_CONFIG_PROVIDERS: env
       CONNECT_CONFIG_PROVIDERS_ENV_CLASS: org.apache.kafka.common.config.provider.EnvVarConfigProvider
-      # JMX -> Prometheus disabled temporarily due to missing javaagent JAR
-      # TODO: Download and mount jmx_prometheus_javaagent.jar to enable metrics
-      # KAFKA_OPTS: "-javaagent:/kafka/jmx_prometheus_javaagent.jar=9404:/kafka/etc/jmx-exporter.yml"
+      # JMX -> Prometheus: the agent JAR is baked into the image by
+      # platform/kafka/Dockerfile; the mapping config is mounted below.
+      KAFKA_OPTS: "-javaagent:/kafka/jmx_prometheus_javaagent.jar=9404:/kafka/etc/jmx-exporter.yml"
       JMXHOST: localhost
       JMXPORT: 1976
     ports:
@@ -353,6 +356,7 @@ services:
         condition: service_healthy
     environment:
       POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
       PROMETHEUS_PUSHGATEWAY_URL: http://pushgateway:9091
     # Does nothing until asked: `make ingest` or the Airflow DAG drives it.
     command: ["--help"]
@@ -537,6 +541,27 @@ services:
     logging: *default-logging
     networks: [fineract-net]
 
+  # Host metrics (CPU, memory, disk) that the DiskPressure alert in
+  # platform_alerts.yml keys on. Runs in the container's PID/host namespaces
+  # so it sees the host's /proc, /sys and filesystems - not just the
+  # container view.
+  node-exporter:
+    image: prom/node-exporter:v1.8.2
+    command:
+      - --path.procfs=/host/proc
+      - --path.sysfs=/host/sys
+      - --path.rootfs=/host/root
+      - --no-collector.arp
+      - --no-collector.netdev
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/host/root:ro
+    ports:
+      - "9100:9100"
+    logging: *default-logging
+    networks: [fineract-net]
+
   kafka-exporter:
     image: danielqsj/kafka-exporter:v1.7.0
     depends_on:
@@ -545,6 +570,10 @@ services:
     command: ["--kafka.server=kafka:29092"]
     ports:
       - "9308:9308"
+    # The kafka healthcheck can pass a beat before the PLAINTEXT broker
+    # listener accepts connections, so the first start sometimes dies with
+    # "client has run out of available brokers". Restarting recovers it.
+    restart: unless-stopped
     logging: *default-logging
     networks: [fineract-net]
 
@@ -563,6 +592,7 @@ services:
         condition: service_healthy
     environment:
       POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
       CLICKHOUSE_HOST: clickhouse
       EXPORTER_PORT: "9105"
       EXPORTER_SCRAPE_INTERVAL_SECONDS: "30"
