@@ -19,8 +19,8 @@ chdb = pytest.importorskip("chdb", reason="chdb is required for warehouse SQL te
 
 def _run(script: Path, *args: str) -> subprocess.CompletedProcess:
     return subprocess.run(
-        [sys.executable, str(script), *args],
-        capture_output=True, text=True, timeout=600)
+        [sys.executable, str(script), *args], capture_output=True, text=True, timeout=600
+    )
 
 
 def test_clickhouse_ddl_executes_on_a_real_engine(repo_root: Path) -> None:
@@ -28,7 +28,8 @@ def test_clickhouse_ddl_executes_on_a_real_engine(repo_root: Path) -> None:
     ClickHouse, and the CDC conversions must round-trip."""
     result = _run(repo_root / "scripts" / "validate_clickhouse_sql.py")
     assert result.returncode == 0, (
-        f"ClickHouse DDL validation failed:\n{result.stdout}\n{result.stderr}")
+        f"ClickHouse DDL validation failed:\n{result.stdout}\n{result.stderr}"
+    )
     assert "All ClickHouse conversion checks passed" in result.stdout
 
 
@@ -36,8 +37,7 @@ def test_dbt_dag_builds_and_tests_pass(repo_root: Path) -> None:
     """The whole dbt DAG is built on the embedded engine and every data
     test is executed against the result."""
     result = _run(repo_root / "scripts" / "validate_dbt_sql.py")
-    assert result.returncode == 0, (
-        f"dbt DAG validation failed:\n{result.stdout}\n{result.stderr}")
+    assert result.returncode == 0, f"dbt DAG validation failed:\n{result.stdout}\n{result.stderr}"
     assert "All models built and all data tests passed" in result.stdout
 
 
@@ -71,8 +71,9 @@ def test_every_model_is_reachable_from_a_source(repo_root: Path) -> None:
 def test_no_model_selects_star_from_a_source(repo_root: Path) -> None:
     """`select *` straight out of the raw layer would leak CDC metadata
     columns into the warehouse and make schema drift invisible."""
-    marts = (repo_root / "transform" / "fineract_analytics" / "models" / "marts")
+    marts = repo_root / "transform" / "fineract_analytics" / "models" / "marts"
     for path in marts.rglob("*.sql"):
         text = path.read_text().lower()
         assert "source(" not in text, (
-            f"{path.name} reads a source directly; marts must go through staging")
+            f"{path.name} reads a source directly; marts must go through staging"
+        )

@@ -46,8 +46,16 @@ def first_run(settings):
     pipeline = IngestionPipeline(settings)
     try:
         outcomes = pipeline.run(
-            entities=["offices", "staff", "loan_products", "savings_products",
-                      "clients", "loans", "savings_accounts"])
+            entities=[
+                "offices",
+                "staff",
+                "loan_products",
+                "savings_products",
+                "clients",
+                "loans",
+                "savings_accounts",
+            ]
+        )
     finally:
         pipeline.close()
     return {outcome.entity: outcome for outcome in outcomes}
@@ -74,8 +82,11 @@ class TestFirstLoad:
             assert watermark["last_row_count"] > 0
 
     def test_run_history_was_recorded(self, loader):
-        rows = loader.connect().execute(
-            "SELECT entity, status FROM meta.v_latest_ingestion_run").fetchall()
+        rows = (
+            loader.connect()
+            .execute("SELECT entity, status FROM meta.v_latest_ingestion_run")
+            .fetchall()
+        )
         assert rows
         assert all(status == "success" for _entity, status in rows)
 
@@ -97,10 +108,12 @@ class TestIdempotency:
         for outcome in outcomes:
             assert outcome.ok
             assert outcome.result.rows_inserted == 0, (
-                f"{outcome.entity} re-inserted rows on an unchanged run")
+                f"{outcome.entity} re-inserted rows on an unchanged run"
+            )
             assert outcome.result.rows_updated == 0, (
                 f"{outcome.entity} rewrote unchanged rows - the payload hash "
-                f"is not suppressing churn")
+                f"is not suppressing churn"
+            )
             assert outcome.result.rows_unchanged > 0
 
     def test_row_counts_are_stable_after_a_re_run(self, loader):
@@ -115,7 +128,8 @@ class TestIdempotency:
         with connection.cursor() as cursor:
             cursor.execute(
                 "UPDATE oltp.clients SET display_name = 'STALE', "
-                "_payload_hash = 'forced' WHERE client_id = 1")
+                "_payload_hash = 'forced' WHERE client_id = 1"
+            )
         connection.commit()
 
         from fineract_ingest.pipeline import IngestionPipeline
@@ -139,13 +153,23 @@ class TestCdcReadiness:
         with connection.cursor() as cursor:
             cursor.execute(
                 "SELECT tablename FROM pg_publication_tables "
-                "WHERE pubname = 'fineract_cdc_pub' AND schemaname = 'oltp'")
+                "WHERE pubname = 'fineract_cdc_pub' AND schemaname = 'oltp'"
+            )
             published = {row[0] for row in cursor.fetchall()}
         connection.commit()
-        expected = {"offices", "staff", "loan_products", "savings_products",
-                    "clients", "loans", "loan_transactions", "savings_accounts"}
+        expected = {
+            "offices",
+            "staff",
+            "loan_products",
+            "savings_products",
+            "clients",
+            "loans",
+            "loan_transactions",
+            "savings_accounts",
+        }
         assert expected.issubset(published), (
-            f"tables missing from the CDC publication: {expected - published}")
+            f"tables missing from the CDC publication: {expected - published}"
+        )
 
     def test_wal_level_is_logical(self, loader):
         connection = loader.connect()
@@ -162,7 +186,8 @@ class TestCdcReadiness:
             cursor.execute(
                 "SELECT c.relname, c.relreplident FROM pg_class c "
                 "JOIN pg_namespace n ON n.oid = c.relnamespace "
-                "WHERE n.nspname = 'oltp'")
+                "WHERE n.nspname = 'oltp'"
+            )
             identities = dict(cursor.fetchall())
         connection.commit()
         assert identities["clients"] == "f"
@@ -179,8 +204,7 @@ class TestCdcReadiness:
 
 
 class TestQuarantine:
-    def test_a_malformed_record_is_quarantined_and_the_batch_survives(
-            self, settings, loader):
+    def test_a_malformed_record_is_quarantined_and_the_batch_survives(self, settings, loader):
         """One bad record must not fail a good batch, and must not
         disappear either."""
         from fineract_ingest.entities import ENTITIES
@@ -189,8 +213,7 @@ class TestQuarantine:
 
         pipeline = IngestionPipeline(settings)
         spec = ENTITIES["clients"]
-        rows, rejects = pipeline._map_and_validate(
-            spec, [{"displayName": "no id at all"}])
+        rows, rejects = pipeline._map_and_validate(spec, [{"displayName": "no id at all"}])
         assert rows == []
         assert len(rejects) == 1
 
@@ -202,8 +225,9 @@ class TestQuarantine:
 
         with connection.cursor() as cursor:
             cursor.execute(
-                "SELECT rule, payload FROM meta.ingestion_reject "
-                "WHERE batch_id = %s", (str(batch_id),))
+                "SELECT rule, payload FROM meta.ingestion_reject WHERE batch_id = %s",
+                (str(batch_id),),
+            )
             rule, payload = cursor.fetchone()
         connection.commit()
         assert rule == "primary_key_not_null"
@@ -224,4 +248,5 @@ class TestParentDrivenIngestion:
 
         assert outcome.ok
         assert outcome.result.rows_read > 0, (
-            "the child crawl read nothing - parent ids were not resolved")
+            "the child crawl read nothing - parent ids were not resolved"
+        )
