@@ -47,21 +47,21 @@ KAFKA_VIRTUAL_COLUMNS = """,
 
 def split_statements(sql: str) -> list[str]:
     """Split on ';' at end of line, ignoring '--' comments."""
-    cleaned = "\n".join(
-        line for line in sql.splitlines()
-        if not line.strip().startswith("--")
-    )
+    cleaned = "\n".join(line for line in sql.splitlines() if not line.strip().startswith("--"))
     return [s.strip() for s in cleaned.split(";") if s.strip()]
 
 
 def stub_kafka_engines(sql: str) -> str:
     """Rewrite Kafka engine tables into MergeTree stubs with virtuals."""
+
     # Add the Kafka virtual columns just before the closing paren of the
     # column list (the last ')' before 'ENGINE = Kafka').
     def rewrite(match: re.Match) -> str:
         body = match.group("body")
-        return (f"{match.group('head')}{body}{KAFKA_VIRTUAL_COLUMNS})\n"
-                f"ENGINE = MergeTree ORDER BY tuple()")
+        return (
+            f"{match.group('head')}{body}{KAFKA_VIRTUAL_COLUMNS})\n"
+            f"ENGINE = MergeTree ORDER BY tuple()"
+        )
 
     pattern = re.compile(
         r"(?P<head>CREATE TABLE IF NOT EXISTS [\w.]+\s*\()"
@@ -93,8 +93,7 @@ def apply_file(session: Session, path: Path, transform=None) -> int:
             count += 1
         except Exception as exc:
             head = statement[:400].replace("\n", " ")
-            print(f"\n[FAIL] {path.name}\n  statement: {head}...\n  error: {exc}",
-                  file=sys.stderr)
+            print(f"\n[FAIL] {path.name}\n  statement: {head}...\n  error: {exc}", file=sys.stderr)
             raise
     return count
 
@@ -102,7 +101,7 @@ def apply_file(session: Session, path: Path, transform=None) -> int:
 def round_trip_check(session: Session) -> None:
     """Push one synthetic Debezium row through every conversion path."""
     now_ms = int(datetime(2026, 8, 11, 9, 30, tzinfo=UTC).timestamp() * 1000)
-    epoch_days = 20_678          # 2026-08-11
+    epoch_days = 20_678  # 2026-08-11
 
     # -- loans: decimals, dates, bools, delete flag --------------------
     session.run(f"""
@@ -165,7 +164,8 @@ def round_trip_check(session: Session) -> None:
     """)
     print(f"  out-of-order guard: argMax winner = {winner}")
     assert winner != "StaleValue", (
-        "an event with an OLDER source commit time won - version column is wrong")
+        "an event with an OLDER source commit time won - version column is wrong"
+    )
 
     # -- loan_transactions: partitioned fact ----------------------------
     session.run(f"""
@@ -196,7 +196,8 @@ def round_trip_check(session: Session) -> None:
 
     # -- audit stream ----------------------------------------------------
     audit = session.scalar(
-        "SELECT count() FROM fineract_raw.cdc_audit WHERE source_table = 'loans'")
+        "SELECT count() FROM fineract_raw.cdc_audit WHERE source_table = 'loans'"
+    )
     print(f"  cdc_audit events recorded: {audit}")
     assert int(audit) >= 3, "audit MV did not capture every change event"
 
@@ -212,8 +213,7 @@ def main() -> int:
         return 2
 
     session = Session()
-    print(f"Validating ClickHouse DDL with chdb "
-          f"(engine {session.scalar('SELECT version()')})\n")
+    print(f"Validating ClickHouse DDL with chdb (engine {session.scalar('SELECT version()')})\n")
 
     total = 0
     for path in files:

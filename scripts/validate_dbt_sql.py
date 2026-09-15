@@ -111,17 +111,19 @@ class DbtJinja:
         return self.current.relation if self.current else "this"
 
     def _install_globals(self) -> None:
-        self.env.globals.update({
-            "ref": self._ref,
-            "source": self._source,
-            "config": self._config,
-            "var": self._var,
-            "is_incremental": lambda: False,   # validate the full-refresh path
-            "log": lambda *a, **k: "",
-            "target": {"name": "ci", "schema": "fineract", "type": "clickhouse"},
-            "run_started_at": "2026-08-11 00:00:00",
-            "invocation_id": "validate-dbt-sql",
-        })
+        self.env.globals.update(
+            {
+                "ref": self._ref,
+                "source": self._source,
+                "config": self._config,
+                "var": self._var,
+                "is_incremental": lambda: False,  # validate the full-refresh path
+                "log": lambda *a, **k: "",
+                "target": {"name": "ci", "schema": "fineract", "type": "clickhouse"},
+                "run_started_at": "2026-08-11 00:00:00",
+                "invocation_id": "validate-dbt-sql",
+            }
+        )
         # `this` must behave as a value, not a callable, in templates.
         self.env.globals["this"] = _LazyThis(self)
 
@@ -170,8 +172,7 @@ class Engine:
 
 
 def split_statements(sql: str) -> list[str]:
-    cleaned = "\n".join(
-        line for line in sql.splitlines() if not line.strip().startswith("--"))
+    cleaned = "\n".join(line for line in sql.splitlines() if not line.strip().startswith("--"))
     return [s.strip() for s in cleaned.split(";") if s.strip()]
 
 
@@ -186,8 +187,7 @@ def discover_models() -> dict[str, Model]:
         layer = path.relative_to(MODELS_DIR).parts[0]
         if layer not in LAYER_DATABASE:
             continue
-        models[path.stem] = Model(name=path.stem, path=path, layer=layer,
-                                  raw_sql=path.read_text())
+        models[path.stem] = Model(name=path.stem, path=path, layer=layer, raw_sql=path.read_text())
     return models
 
 
@@ -439,13 +439,15 @@ def load_seeds(engine: Engine) -> None:
         engine.run(
             f"CREATE TABLE IF NOT EXISTS fineract_staging.{path.stem} ("
             + ", ".join(f"{c} String" for c in columns)
-            + ") ENGINE = MergeTree ORDER BY tuple()")
+            + ") ENGINE = MergeTree ORDER BY tuple()"
+        )
         values = ", ".join(
             "(" + ", ".join("'" + str(row[c]).replace("'", "''") + "'" for c in columns) + ")"
-            for row in rows)
+            for row in rows
+        )
         engine.run(
-            f"INSERT INTO fineract_staging.{path.stem} "
-            f"({', '.join(columns)}) VALUES {values}")
+            f"INSERT INTO fineract_staging.{path.stem} ({', '.join(columns)}) VALUES {values}"
+        )
 
 
 # ---------------------------------------------------------------------
@@ -469,43 +471,57 @@ def collect_schema_tests(models: dict[str, Model]) -> list[tuple[str, str, str]]
                 column_name = column["name"]
                 for test in column.get("data_tests", []) or column.get("tests", []) or []:
                     if test == "not_null":
-                        checks.append((
-                            f"{name}.{column_name}.not_null",
-                            f"SELECT count() FROM {relation} WHERE {column_name} IS NULL",
-                            "0"))
+                        checks.append(
+                            (
+                                f"{name}.{column_name}.not_null",
+                                f"SELECT count() FROM {relation} WHERE {column_name} IS NULL",
+                                "0",
+                            )
+                        )
                     elif test == "unique":
-                        checks.append((
-                            f"{name}.{column_name}.unique",
-                            f"SELECT count() - countDistinct({column_name}) FROM {relation}",
-                            "0"))
+                        checks.append(
+                            (
+                                f"{name}.{column_name}.unique",
+                                f"SELECT count() - countDistinct({column_name}) FROM {relation}",
+                                "0",
+                            )
+                        )
                     elif isinstance(test, dict) and "accepted_values" in test:
                         values = test["accepted_values"]["values"]
                         rendered = ", ".join(f"'{v}'" for v in values)
-                        checks.append((
-                            f"{name}.{column_name}.accepted_values",
-                            f"SELECT count() FROM {relation} "
-                            f"WHERE {column_name} IS NOT NULL "
-                            f"AND toString({column_name}) NOT IN ({rendered})",
-                            "0"))
+                        checks.append(
+                            (
+                                f"{name}.{column_name}.accepted_values",
+                                f"SELECT count() FROM {relation} "
+                                f"WHERE {column_name} IS NOT NULL "
+                                f"AND toString({column_name}) NOT IN ({rendered})",
+                                "0",
+                            )
+                        )
                     elif isinstance(test, dict) and "relationships" in test:
                         spec = test["relationships"]
-                        target_name = re.sub(r".*ref\(\s*['\"]([\w_]+)['\"]\s*\).*", r"\1",
-                                             str(spec.get("to", "")))
+                        target_name = re.sub(
+                            r".*ref\(\s*['\"]([\w_]+)['\"]\s*\).*", r"\1", str(spec.get("to", ""))
+                        )
                         target = models.get(target_name)
                         if not target:
                             continue
-                        checks.append((
-                            f"{name}.{column_name}.relationships",
-                            f"SELECT count() FROM {relation} a "
-                            f"LEFT JOIN {target.relation} b "
-                            f"ON a.{column_name} = b.{spec['field']} "
-                            f"WHERE a.{column_name} IS NOT NULL AND b.{spec['field']} IS NULL",
-                            "0"))
+                        checks.append(
+                            (
+                                f"{name}.{column_name}.relationships",
+                                f"SELECT count() FROM {relation} a "
+                                f"LEFT JOIN {target.relation} b "
+                                f"ON a.{column_name} = b.{spec['field']} "
+                                f"WHERE a.{column_name} IS NOT NULL AND b.{spec['field']} IS NULL",
+                                "0",
+                            )
+                        )
     return checks
 
 
-def run_singular_tests(engine: Engine, jinja: DbtJinja,
-                       models: dict[str, Model], verbose: bool) -> list[str]:
+def run_singular_tests(
+    engine: Engine, jinja: DbtJinja, models: dict[str, Model], verbose: bool
+) -> list[str]:
     failures: list[str] = []
     for path in sorted(TESTS_DIR.glob("*.sql")):
         probe = Model(name=path.stem, path=path, layer="marts", raw_sql=path.read_text())
@@ -529,8 +545,7 @@ def main() -> int:
     args = parser.parse_args()
 
     engine = Engine()
-    print(f"Building the dbt DAG on embedded ClickHouse "
-          f"{engine.scalar('SELECT version()')}\n")
+    print(f"Building the dbt DAG on embedded ClickHouse {engine.scalar('SELECT version()')}\n")
 
     print("  [1/5] creating raw layer from platform/clickhouse/init")
     create_raw_layer(engine)
@@ -547,8 +562,7 @@ def main() -> int:
         try:
             jinja.render(model)
         except Exception as exc:
-            print(f"\n[JINJA FAIL] {model.path.relative_to(REPO_ROOT)}: {exc}",
-                  file=sys.stderr)
+            print(f"\n[JINJA FAIL] {model.path.relative_to(REPO_ROOT)}: {exc}", file=sys.stderr)
             return 1
 
     ordered = topological_order(models)
@@ -567,8 +581,8 @@ def main() -> int:
         try:
             engine.run(f"DROP TABLE IF EXISTS {model.relation}")
             engine.run(
-                f"CREATE TABLE {model.relation} ENGINE = MergeTree ORDER BY tuple() "
-                f"AS {sql}")
+                f"CREATE TABLE {model.relation} ENGINE = MergeTree ORDER BY tuple() AS {sql}"
+            )
             rows = engine.scalar(f"SELECT count() FROM {model.relation}")
 
             # Guard against a genuinely nasty ClickHouse behaviour: when a
@@ -586,13 +600,13 @@ def main() -> int:
                 names = bad_columns.replace("\n", ", ")
                 raise RuntimeError(
                     f"unaliased ambiguous column(s) produced qualified names: "
-                    f"{names} - add an explicit AS alias")
+                    f"{names} - add an explicit AS alias"
+                )
 
             built += 1
             print(f"    {model.layer:<13} {model.name:<44} OK  {rows:>8} rows")
         except Exception as exc:
-            print(f"\n[MODEL FAIL] {model.path.relative_to(REPO_ROOT)}\n  {exc}\n",
-                  file=sys.stderr)
+            print(f"\n[MODEL FAIL] {model.path.relative_to(REPO_ROOT)}\n  {exc}\n", file=sys.stderr)
             if args.verbose:
                 print(sql, file=sys.stderr)
             return 1
