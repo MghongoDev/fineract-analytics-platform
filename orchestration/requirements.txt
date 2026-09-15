@@ -12,7 +12,7 @@
 # dbt-core is pinned to the newest 1.8.x that still accepts protobuf < 5;
 # the other pins mirror the base image exactly so pip has nothing to hunt
 # for at all.
-dbt-core==1.8.8
+dbt-core==1.12.4
 dbt-clickhouse==1.8.9
 clickhouse-connect==0.8.9
 psycopg[binary]==3.1.19
