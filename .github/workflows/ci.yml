@@ -284,7 +284,7 @@ jobs:
           --health-timeout 5s
           --health-retries 10
       clickhouse:
-        image: clickhouse/clickhouse-server:24.8-alpine
+        image: clickhouse/clickhouse-server:24.8
         ports: ["8123:8123", "9000:9000"]
         env:
           CLICKHOUSE_SKIP_USER_SETUP: "1"
