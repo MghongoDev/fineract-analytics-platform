@@ -300,7 +300,7 @@ services:
     logging: *default-logging
     networks: [fineract-net]
 
-# Optional web UI for poking at Kafka/Connect by hand (profile: tools).
+  # Optional web UI for poking at Kafka/Connect by hand (profile: tools).
   # no-healthcheck: interactive debugging tool, not part of the core
   # pipeline; liveness is up to the person running `make ui`.
   kafka-ui:

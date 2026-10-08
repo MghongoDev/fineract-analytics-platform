@@ -77,7 +77,7 @@ jobs:
             context: ingestion
             dockerfile: ingestion/Dockerfile
           - image: orchestration-airflow
-            context: orchestration
+            context: .
             dockerfile: orchestration/Dockerfile
           - image: observability-exporter
             context: observability/exporter

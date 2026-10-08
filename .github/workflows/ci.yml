@@ -198,7 +198,7 @@ jobs:
           CLICKHOUSE_USER: default
           CLICKHOUSE_PASSWORD: ""
           CLICKHOUSE_DATABASE: fineract_ci
-        run: dbt docs generate --no-compile
+        run: dbt docs generate --no-compile --empty-catalog
 
       # Real governance gate, not a style nit: a mart with no description
       # is undiscoverable in the catalogue, and a staging model with zero
@@ -555,7 +555,7 @@ jobs:
             context: ingestion
             dockerfile: ingestion/Dockerfile
           - image: orchestration-airflow
-            context: orchestration
+            context: .
             dockerfile: orchestration/Dockerfile
           - image: observability-exporter
             context: observability/exporter
