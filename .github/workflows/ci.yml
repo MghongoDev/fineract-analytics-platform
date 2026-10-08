@@ -34,7 +34,7 @@ jobs:
           python-version: ${{ env.PYTHON_VERSION }}
 
       - name: Install lint tooling
-        run: pip install ruff yamllint sqlfluff sqlfluff-templater-jinja
+        run: pip install ruff yamllint sqlfluff Jinja2
 
       - name: ruff check (ingestion, orchestration, observability, scripts)
         run: |
@@ -179,6 +179,7 @@ jobs:
       # dbt parse only needs Jinja to render and the DAG to resolve - no
       # warehouse connection required, so it is a fast, cheap gate on
       # every push. The credentials below are dummies; nothing is queried.
+      # --no-partial-parse ensures a clean parse without relying on cache.
       - name: dbt parse
         env:
           DBT_TARGET: ci
@@ -187,7 +188,7 @@ jobs:
           CLICKHOUSE_USER: default
           CLICKHOUSE_PASSWORD: ""
           CLICKHOUSE_DATABASE: fineract_ci
-        run: dbt parse
+        run: dbt parse --no-partial-parse
 
       - name: dbt docs generate (no compile, no warehouse)
         env:
@@ -288,10 +289,11 @@ jobs:
         env:
           CLICKHOUSE_SKIP_USER_SETUP: "1"
         options: >-
-          --health-cmd "wget -qO- http://localhost:8123/ping || exit 1"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 10
+          --health-cmd "wget --no-verbose --tries=1 --spider http://localhost:8123/ping || exit 1"
+          --health-interval 10s
+          --health-timeout 10s
+          --health-retries 20
+          --health-start-period 30s
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
