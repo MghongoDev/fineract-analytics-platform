@@ -271,18 +271,9 @@ jobs:
     runs-on: ubuntu-latest
     if: github.event_name == 'pull_request' || github.ref == 'refs/heads/main'
     services:
-      postgres:
-        image: postgres:16
-        env:
-          POSTGRES_PASSWORD: postgres
-          POSTGRES_USER: postgres
-          POSTGRES_DB: fineract_oltp
-        ports: ["5432:5432"]
-        options: >-
-          --health-cmd "pg_isready -U postgres"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 10
+      # Postgres is started by a step below instead: the CDC tests require
+      # wal_level=logical, which is a server flag and cannot be changed on
+      # an already-running service container.
       clickhouse:
         image: clickhouse/clickhouse-server:24.8
         ports: ["8123:8123", "9000:9000"]
@@ -307,6 +298,24 @@ jobs:
       - name: Install ingestion package with dev extras
         run: pip install -e "ingestion[dev]"
 
+      # The platform needs logical WAL for Debezium. Service containers
+      # cannot take a server flag, so run Postgres ourselves with the same
+      # flag the local compose stack uses in platform/postgres/conf.
+      - name: Start Postgres with logical WAL
+        run: |
+          docker run -d --name ci-postgres \
+            -p 5432:5432 \
+            -e POSTGRES_PASSWORD=postgres \
+            -e POSTGRES_USER=postgres \
+            -e POSTGRES_DB=fineract_oltp \
+            postgres:16 -c wal_level=logical
+          for i in $(seq 1 60); do
+            docker exec ci-postgres pg_isready -U postgres >/dev/null 2>&1 && break
+            sleep 1
+          done
+          docker exec ci-postgres pg_isready -U postgres
+          echo "wal_level: $(docker exec ci-postgres psql -U postgres -d fineract_oltp -tAc 'SHOW wal_level')"
+
       - name: Apply Postgres init SQL (roles, OLTP schema, control plane, CDC publication)
         env:
           PGPASSWORD: postgres
@@ -324,8 +333,13 @@ jobs:
       # would just fail waiting for a connection. Everything else -
       # databases, raw tables, ops views - is real DDL against a real
       # server and is applied normally.
+      # The HTTP interface rejects a POST body with more than one statement
+      # (HTTP 400), so a whole init file cannot be sent in one request.
+      # scripts/apply_clickhouse_sql.py splits each file and posts the
+      # statements one at a time, the same way clickhouse-client does.
       - name: Apply ClickHouse init SQL (skipping Kafka source + MV files, no broker in CI)
         run: |
+          files=""
           for f in platform/clickhouse/init/*.sql; do
             base=$(basename "$f")
             case "$base" in
@@ -334,16 +348,19 @@ jobs:
                 continue
                 ;;
             esac
-            echo "applying $base"
-            curl -fsS "http://localhost:8123/" --data-binary @"$f"
+            files="$files $f"
           done
+          python3 scripts/apply_clickhouse_sql.py $files
 
       - name: Start mock Fineract server
         run: |
-          python -m fineract_ingest.mock_server --port 8090 --clients 200 --loans 400 &
+          # Counts must match the expectations in tests/integration/test_end_to_end_ingestion.py.
+          python -m fineract_ingest.mock_server --port 8090 --clients 120 --loans 200 &
           echo $! > mock_server.pid
           for i in $(seq 1 30); do
-            curl -fsS "http://localhost:8090/fineract-provider/api/v1/offices" -u mifos:password && break
+            curl -fsS -H 'Fineract-Platform-TenantId: default' \
+              "http://localhost:8090/fineract-provider/api/v1/offices" \
+              -u mifos:password && break
             sleep 1
           done
 
