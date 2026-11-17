@@ -24,7 +24,7 @@ from __future__ import annotations
 import argparse
 import re
 import sys
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
 try:
@@ -100,8 +100,13 @@ def apply_file(session: Session, path: Path, transform=None) -> int:
 
 def round_trip_check(session: Session) -> None:
     """Push one synthetic Debezium row through every conversion path."""
-    now_ms = int(datetime(2026, 8, 11, 9, 30, tzinfo=UTC).timestamp() * 1000)
-    epoch_days = 20_678  # 2026-08-11
+    # Keep the synthetic events inside the 90-day TTL on cdc_audit. A fixed
+    # date worked when this test was written and then broke silently once
+    # real time passed the TTL window: the audit rows were expired before
+    # the assertion could see them.
+    now = datetime.now(UTC)
+    now_ms = int(now.timestamp() * 1000)
+    epoch_days = (now.date() - date(1970, 1, 1)).days
 
     # -- loans: decimals, dates, bools, delete flag --------------------
     session.run(f"""
@@ -137,7 +142,10 @@ def round_trip_check(session: Session) -> None:
     print(f"  loans round trip: {row}")
     assert "250000" in row, "decimal conversion lost the principal"
     assert "120345.6789" in row, "decimal precision lost on outstanding"
-    assert "2025-07-27" in row or "20" in row, "date conversion failed"
+    expected_disbursed = date(1970, 1, 1) + timedelta(days=epoch_days - 380)
+    assert expected_disbursed.isoformat() in row, (
+        f"date conversion failed: expected {expected_disbursed.isoformat()} in {row}"
+    )
     assert "Decimal(19, 6)" in row, "principal is not Decimal(19,6)"
 
     # -- delete reconciliation -----------------------------------------
