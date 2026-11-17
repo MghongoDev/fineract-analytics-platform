@@ -26,9 +26,7 @@ from pathlib import Path
 
 def split_statements(sql: str) -> list[str]:
     """Split on semicolons, ignoring comment-only lines."""
-    cleaned = "\n".join(
-        line for line in sql.splitlines() if not line.strip().startswith("--")
-    )
+    cleaned = "\n".join(line for line in sql.splitlines() if not line.strip().startswith("--"))
     return [s.strip() for s in cleaned.split(";") if s.strip()]
 
 
