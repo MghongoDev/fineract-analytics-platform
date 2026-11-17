@@ -34,6 +34,9 @@ jobs:
   verify-ci:
     name: Verify CI passed for this SHA
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      checks: read
     outputs:
       sha: ${{ steps.resolve.outputs.sha }}
     steps:
@@ -51,15 +54,20 @@ jobs:
       # only way to know that for certain is to ask the API, not to
       # assume. Deploying an unvetted SHA is exactly how a broken build
       # reaches production.
+      # The check run is named after the job's `name:` field ("CI summary"),
+      # not its workflow id ("ci-summary"). Sort by started_at so a re-run
+      # supersedes an older failed check for the same SHA.
       - name: Require a successful CI run for this SHA
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           sha="${{ steps.resolve.outputs.sha }}"
           echo "checking CI status for ${sha}"
-          conclusion=$(gh api "repos/${{ github.repository }}/commits/${sha}/check-runs" \
-            --jq '[.check_runs[] | select(.name == "ci-summary")][0].conclusion // "missing"')
-          echo "ci-summary conclusion: ${conclusion}"
+          conclusion=$(gh api --paginate "repos/${{ github.repository }}/commits/${sha}/check-runs?per_page=100" \
+            --jq '.check_runs[] | select(.name == "CI summary") | [.started_at, .conclusion] | @tsv' \
+            | sort | tail -1 | cut -f2)
+          conclusion=${conclusion:-missing}
+          echo "CI summary conclusion: ${conclusion}"
           if [ "$conclusion" != "success" ]; then
             echo "::error::CI has not passed (or has not run) for ${sha}; refusing to deploy"
             exit 1
