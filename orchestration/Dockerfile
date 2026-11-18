@@ -11,7 +11,7 @@
 # The ingestion package is installed here too, so the pipeline DAG can
 # call it in-process and its logs land in the Airflow task log.
 # =====================================================================
-FROM apache/airflow:2.11.1-python3.11
+FROM apache/airflow:slim-2.11.1-python3.11
 
 USER root
 # The Airflow base image ships Debian packages that accumulate critical
@@ -28,7 +28,17 @@ RUN apt-get update \
 USER airflow
 
 COPY orchestration/requirements.txt /tmp/orchestration-requirements.txt
-RUN pip install --no-cache-dir -r /tmp/orchestration-requirements.txt
+# The slim base ships uv 0.9.11, which has a fixable critical CA-store
+# advisory (GHSA-hq85-5cpj-mr62). Nothing here uses uv at runtime, but the
+# image scan gates on it, so pin the patched release. The other pins close
+# fixable critical advisories in transitive dependencies of the base image.
+RUN pip install --no-cache-dir -r /tmp/orchestration-requirements.txt \
+ && pip install --no-cache-dir --upgrade \
+      'uv==0.13.4' \
+      'PyJWT==2.14.0' \
+      'anyio==4.14.2' \
+      'certifi==2026.10.18' \
+      'deepdiff==8.6.1'
 
 # The ingestion package - installed non-editable so the image is
 # self-contained and reproducible.
