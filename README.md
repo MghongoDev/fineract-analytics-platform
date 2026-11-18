@@ -46,7 +46,7 @@ make urls        # every UI, with credentials
 4. registers the Debezium connector idempotently
 5. starts Airflow (initialised, unpaused), Prometheus, Grafana, the
    Pushgateway and the exporters
-6. waits for every healthcheck before returning
+6. prints the state of every service once the containers start
 
 Then trigger a run and watch the data move:
 
@@ -189,16 +189,18 @@ The three DAGs:
 | `fineract_backfill` | manual | re-ingestion and full rebuild, behind a typed confirmation |
 
 The CDC gate is the important one: it blocks transformation until
-ClickHouse row counts match PostgreSQL **and** CDC freshness is under
-five minutes. Without it, dbt would happily transform a warehouse that
-has not received the rows yet, succeed, and publish stale numbers.
+ClickHouse row counts match PostgreSQL **and** p95 CDC delivery lag is
+under five minutes. Source-event age would fail on the normal no-change
+run, so it is not used. Without the gate, dbt would happily transform a
+warehouse that has not received the rows yet, succeed, and publish stale
+numbers.
 
 ---
 
 ## Tests
 
 ```bash
-make test               # 105 unit + integration tests
+make test               # 168 unit tests, with coverage
 make validate           # execute all ClickHouse DDL and build the whole dbt DAG
 make lint               # ruff, yamllint, shellcheck, sqlfluff
 ```
@@ -219,7 +221,7 @@ GitHub Actions, triggered on push and pull request:
 
 `lint` → `unit-tests` → `sql-validation` → `dbt-checks` →
 `integration-tests` · `connector-config-validation` · `compose-validation`
-→ `build-images` → `ci-summary`
+· `dag-integrity` → `build-images` → `ci-summary`
 
 What each gate protects is described in
 [`docs/DESIGN_REPORT.md` §7](docs/DESIGN_REPORT.md#7-cicd). Notably,
@@ -236,7 +238,7 @@ check asserting data freshness before declaring success.
 ## Layout
 
 ```
-├── docker-compose.yml            17 services, 4 profiles
+├── docker-compose.yml            23 services, 3 profiles
 ├── Makefile                      28 targets; run `make help`
 ├── .env.example                  every configuration knob, documented
 ├── ingestion/                    Fineract REST → PostgreSQL

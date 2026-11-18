@@ -89,12 +89,13 @@ class CDCCaughtUpSensor(BaseSensorOperator):
     1. **Row parity.** For each watched entity, the count of live keys in
        ClickHouse is within `row_tolerance` of the Postgres count. This
        catches events that were dropped entirely.
-    2. **Freshness.** The newest source commit time visible in ClickHouse
-       is no older than `max_lag_seconds`. This catches a stream that is
-       merely slow.
+    2. **Delivery lag.** For each watched entity, the p95 lag from source
+       commit to a queryable ClickHouse row is under `max_lag_seconds`.
+       This catches a stream that is slow. Source-event age is not used:
+       a quiet four-hour schedule would otherwise fail every no-change run.
 
     Row parity alone is not enough (an idle stream trivially matches) and
-    freshness alone is not enough (a stream that is delivering some events
+    lag alone is not enough (a stream that is delivering some events
     while silently dropping others looks perfectly fresh). Requiring both
     is what makes this a real gate.
     """
@@ -155,12 +156,21 @@ class CDCCaughtUpSensor(BaseSensorOperator):
             if abs(delta) > self.row_tolerance:
                 caught_up = False
 
+        # Use delivery lag, not source-event age. On a four-hour schedule a
+        # quiet source has a perfectly healthy stream with no recent
+        # commits; comparing commit age to a five-minute limit would time
+        # the gate out on every no-change run. The view's lag column is
+        # Postgres-commit-to-ClickHouse-visible latency, which is what
+        # "caught up" actually means here.
+        watched = {self.ENTITY_TABLES[e][1] for e in self.entities if e in self.ENTITY_TABLES}
         freshness = clickhouse.query_json(
-            "SELECT source_table, freshness_seconds FROM fineract_ops.v_cdc_freshness"
+            "SELECT source_table, lag_p95_seconds FROM fineract_ops.v_cdc_freshness"
         )
         for row in freshness:
-            seconds = float(row["freshness_seconds"])
-            self.log.info("freshness %-18s %.0fs", row["source_table"], seconds)
+            if row["source_table"] not in watched:
+                continue
+            seconds = float(row["lag_p95_seconds"] or 0)
+            self.log.info("cdc delivery lag %-18s %.0fs", row["source_table"], seconds)
             if seconds > self.max_lag_seconds:
                 caught_up = False
 

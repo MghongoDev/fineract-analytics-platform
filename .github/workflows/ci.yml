@@ -125,6 +125,26 @@ jobs:
           path: coverage.xml
           if-no-files-found: warn
 
+  # The DAG integrity suite needs the real Airflow import machinery. Run it
+  # in the same image the stack uses, so a DAG that fails to parse here is
+  # a DAG that would silently vanish from the scheduler in production.
+  dag-integrity:
+    name: DAG integrity (real Airflow)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Run DAG integrity tests in the Airflow image
+        run: |
+          docker run --rm \
+            -v "$PWD:/src:ro" \
+            -w /src \
+            -e AIRFLOW__CORE__UNIT_TEST_MODE=True \
+            -e AIRFLOW__CORE__LOAD_EXAMPLES=False \
+            apache/airflow:2.10.5-python3.11 \
+            bash -lc "pip install -q pytest && python -m pytest orchestration/tests -q"
+
   # ---------------------------------------------------------------------
   sql-validation:
     name: SQL validation (embedded ClickHouse via chdb)
@@ -467,7 +487,7 @@ jobs:
               require("connector.class")
               require("plugin.name", expected="pgoutput")
               require("decimal.handling.mode", expected="string")
-              require("publication.autocreate.mode", expected="filtered")
+              require("publication.autocreate.mode", expected="disabled")
               require("snapshot.mode")
               require("heartbeat.interval.ms",
                       predicate=lambda v: int(v) > 0,
@@ -645,6 +665,7 @@ jobs:
     needs:
       - lint
       - unit-tests
+      - dag-integrity
       - sql-validation
       - dbt-checks
       - integration-tests
@@ -661,6 +682,7 @@ jobs:
             echo "|---|---|"
             echo "| lint | ${{ needs.lint.result }} |"
             echo "| unit-tests | ${{ needs.unit-tests.result }} |"
+            echo "| dag-integrity | ${{ needs.dag-integrity.result }} |"
             echo "| sql-validation | ${{ needs.sql-validation.result }} |"
             echo "| dbt-checks | ${{ needs.dbt-checks.result }} |"
             echo "| integration-tests | ${{ needs.integration-tests.result }} |"
@@ -672,6 +694,7 @@ jobs:
           required=(
             "${{ needs.lint.result }}"
             "${{ needs.unit-tests.result }}"
+            "${{ needs.dag-integrity.result }}"
             "${{ needs.sql-validation.result }}"
             "${{ needs.dbt-checks.result }}"
             "${{ needs.connector-config-validation.result }}"

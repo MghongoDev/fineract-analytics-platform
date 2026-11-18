@@ -34,6 +34,13 @@
         origination) and are re-derived AS OF the observation date rather
         than taken from the current dimension row
 
+    No prior-loan outcome feature appears here. `is_written_off` and
+    `days_past_due` in staging describe the loan's CURRENT state, using
+    `today()` for delinquency. A prior loan that was written off after the
+    observation date would pass that future event into this row. Only
+    attributes fixed at origination (principal, product, disbursement
+    dates) are safe to carry across.
+
     What is deliberately NOT here: the loan's own repayment behaviour,
     current balances, current delinquency, `client_segment` from
     dim_client. Every one of those is computed from post-origination
@@ -82,8 +89,6 @@ prior_loans as (
     select
         cur.loan_id                                                 as loan_id,
         count()                                                     as prior_loan_count,
-        countIf(prev.is_written_off = 1)                            as prior_written_off_count,
-        countIf(prev.days_past_due > 30)                            as prior_delinquent_count,
         sum(prev.principal_disbursed)                               as prior_total_disbursed,
         max(prev.principal)                                         as prior_max_principal,
         avg(toFloat64(prev.principal))                              as prior_avg_principal,
@@ -121,6 +126,7 @@ prior_repayments as (
         on tx.loan_id = prev.loan_id
        and tx.transaction_date < cur.disbursed_on_date
        and tx.transaction_category = 'repayment'
+       and tx.is_countable = 1
     group by cur.loan_id
 
 )
@@ -172,18 +178,12 @@ select
 
     -- ---------------- prior relationship -------------------------
     coalesce(pl.prior_loan_count, 0)                                as feat_prior_loan_count,
-    coalesce(pl.prior_written_off_count, 0)                         as feat_prior_written_off_count,
-    coalesce(pl.prior_delinquent_count, 0)                          as feat_prior_delinquent_count,
     toFloat64(coalesce(pl.prior_total_disbursed, 0))                as feat_prior_total_disbursed,
     toFloat64(coalesce(pl.prior_max_principal, 0))                  as feat_prior_max_principal,
     coalesce(pl.prior_distinct_products, 0)                         as feat_prior_distinct_products,
     if(pl.prior_last_disbursement_date is null, null,
        dateDiff('day', pl.prior_last_disbursement_date, l.disbursed_on_date))
                                                                     as feat_days_since_prior_loan,
-    {{ safe_divide('pl.prior_written_off_count', 'nullIf(pl.prior_loan_count, 0)') }}
-                                                                    as feat_prior_write_off_rate,
-    {{ safe_divide('pl.prior_delinquent_count', 'nullIf(pl.prior_loan_count, 0)') }}
-                                                                    as feat_prior_delinquency_rate,
     -- Is this loan a step up from anything they have handled before?
     {{ safe_divide('toFloat64(l.principal)', 'nullIf(toFloat64(pl.prior_max_principal), 0)') }}
                                                                     as feat_principal_vs_prior_max,

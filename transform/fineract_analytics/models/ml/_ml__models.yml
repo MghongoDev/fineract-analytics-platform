@@ -35,8 +35,6 @@ models:
           the future into training for a temporally ordered process.
         data_tests:
           - accepted_values: {values: ['train', 'validation', 'test']}
-      - name: feat_prior_write_off_rate
-        description: Share of the borrower's earlier loans that were written off.
       - name: feat_is_first_time_borrower
         description: 1 when there is no prior loan history at all.
 

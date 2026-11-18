@@ -14,9 +14,14 @@
 FROM apache/airflow:2.11.1-python3.11
 
 USER root
+# The Airflow base image ships Debian packages that accumulate critical
+# CVEs between upstream releases. CI scans the built image and fails on
+# any fixable critical finding, so apply the distro security updates in
+# the same layer as the package install.
 RUN apt-get update \
- && apt-get install -y --no-install-recommends \
+ && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
       build-essential libpq-dev curl git \
+ && DEBIAN_FRONTEND=noninteractive ACCEPT_EULA=Y apt-get upgrade -y \
  && apt-get clean \
  && rm -rf /var/lib/apt/lists/*
 

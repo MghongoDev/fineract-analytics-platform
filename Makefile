@@ -63,15 +63,22 @@ help: ## Show this help (self-documented from the double-hash comments below)
 	@echo
 	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z_-]+:.*## / {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
 
+# A fresh clone has no .env: it is gitignored. Compose's `env_file: .env`
+# aborts if it is missing, so seed it from the tracked template. Order-only
+# keeps a newer .env.example from ever overwriting local edits.
+.env: | .env.example
+	@cp .env.example .env
+	@echo "seeded .env from .env.example (local dev defaults)"
+
 # ---------------------------------------------------------------------
 # Stack lifecycle
 # ---------------------------------------------------------------------
 
-up: ## Start the whole stack (all services in docker-compose.yml)
+up: | .env ## Start the whole stack (all services in docker-compose.yml)
 	$(COMPOSE) -f $(COMPOSE_FILE) up -d
 	@$(MAKE) --no-print-directory ps
 
-up-core: ## Start only the core data plane (postgres, kafka, kafka-connect, clickhouse) - no source, no observability
+up-core: | .env ## Start only the core data plane (postgres, kafka, kafka-connect, clickhouse) - no source, no observability
 	# `fineract` is deliberately absent: it lives behind the `fineract`
 	# profile, so naming it here would fail on a stack started without it.
 	$(COMPOSE) -f $(COMPOSE_FILE) up -d postgres kafka kafka-connect clickhouse
@@ -163,8 +170,8 @@ dbt-build: ## Run dbt build (models + tests + seeds + snapshots, in DAG order)
 # Tests & validation
 # ---------------------------------------------------------------------
 
-test: ## Run unit tests (ingestion + repo-level unit tests) with coverage
-	pytest ingestion/tests tests/unit -v --cov=fineract_ingest --cov-report=term
+test: ## Run unit tests with coverage (DAG integrity tests run where Airflow is installed)
+	pytest ingestion/tests tests/unit orchestration/tests -v --cov=fineract_ingest --cov-report=term
 
 test-integration: ## Run the integration test suite (requires a running stack; see `make bootstrap`)
 	pytest tests/integration -v

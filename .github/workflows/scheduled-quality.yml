@@ -63,7 +63,7 @@ jobs:
           CLICKHOUSE_DATABASE: ${{ secrets.CLICKHOUSE_DATABASE }}
         run: dbt source freshness || echo "freshness_failed=true" >> "$GITHUB_OUTPUT"
 
-      - name: Reconciliation check (production)
+      - name: Reconciliation check (production, when script is present)
         id: reconciliation
         if: steps.check_secrets.outputs.configured == 'true'
         env:

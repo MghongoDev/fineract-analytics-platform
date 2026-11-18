@@ -21,9 +21,12 @@ extension to bake into the image and no plugin/server version skew.
 
 **2. An explicitly declared publication.** `fineract_cdc_pub` is created in
 [`04_cdc_publication.sql`](../platform/postgres/init/04_cdc_publication.sql)
-and the connector runs with `publication.autocreate.mode=filtered`. Letting
-Debezium create `FOR ALL TABLES` would require a superuser connector role
-and would start capturing every future table — including `meta.*`, which
+and the connector runs with `publication.autocreate.mode=disabled`. Debezium
+uses the declared table list without changing it. This matters for two
+reasons. First, the connector role does not own the publication, so any mode
+that reconciles tables fails with "must be owner of publication" and retries
+forever while reporting its task as RUNNING. Second, letting Debezium create
+`FOR ALL TABLES` would capture every future table, including `meta.*`, which
 would feed pipeline telemetry back into the analytics stream.
 
 **3. `decimal.handling.mode=string`.** Debezium's default (`precise`)
