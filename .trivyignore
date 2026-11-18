@@ -1,0 +1,7 @@
+# CVE-2026-33264 - unsafe deserialization of serialized DAGs.
+# Fixed only in Apache Airflow 3.3.0. This stack runs 2.11.1: the DAGs,
+# plugins and operators use the Airflow 2 API, so the fix is a major
+# migration, not a patch bump. Tracked as a separate piece of work.
+# Scoped to this advisory only. Every other critical finding fails CI.
+# Review when the Airflow 3 migration lands, or by 2027-02-18.
+CVE-2026-33264
