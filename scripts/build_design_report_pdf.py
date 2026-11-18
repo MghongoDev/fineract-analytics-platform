@@ -227,7 +227,7 @@ Debezium / Kafka (CDC)  &#8594;  ClickHouse
     Airflow 2.10 &middot; Prometheus &middot; Grafana &middot; Docker Compose \
 &middot; GitHub Actions<br/>
     <b>Verified</b>&nbsp; 22 dbt models built on a real ClickHouse engine &middot;
-    133 tests passing &middot; 5,510 rows ingested, 0 writes on re-run<br/>
+    168 tests passing &middot; 5,510 rows ingested, 0 writes on re-run<br/>
     <b>Generated</b>&nbsp; {generated}
   </div>
 </div>

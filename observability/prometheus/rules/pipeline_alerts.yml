@@ -27,7 +27,7 @@ groups:
             Check the Airflow DAG run for the entity's ingestion task first
             (scheduler may be stuck or the task may be queued behind a
             retry backoff); if the task is not running at all, trigger it
-            manually with `airflow dags trigger fineract_ingestion`.
+            manually with `airflow dags trigger fineract_analytics_pipeline`.
 
       # ---------------------------------------------------------------
       # Did it work?
@@ -52,18 +52,18 @@ groups:
       # Was the data good?
       # ---------------------------------------------------------------
       - alert: IngestionRejectRateHigh
-        expr: increase(fineract_ingestion_rejected_rows_total[1h]) > 50
+        expr: fineract_ingestion_rejected_rows_total > 50
         for: 15m
         labels:
           severity: warning
         annotations:
-          summary: "High reject rate for {{ $labels.entity }}"
+          summary: "High reject count for {{ $labels.entity }}"
           description: >
-            More than 50 records for {{ $labels.entity }} were quarantined
-            into meta.ingestion_reject in the last hour
-            ({{ $value | humanize }} rows). This usually means an upstream
-            Fineract schema or business-rule change the validators don't
-            know about yet.
+            More than 50 records for {{ $labels.entity }} are quarantined
+            in meta.ingestion_reject ({{ $value | humanize }} rows). This
+            usually means an upstream Fineract schema or business-rule change
+            the validators do not cover. The count is current state, so a
+            high value persists until the rejects are resolved.
           runbook: >
             SELECT rule, count(*) FROM meta.ingestion_reject WHERE entity =
             '{{ $labels.entity }}' AND rejected_at > now() - interval '1
@@ -128,7 +128,7 @@ groups:
             underlying cause.
 
       - alert: CDCParseErrors
-        expr: increase(fineract_cdc_parse_errors_total[15m]) > 0
+        expr: fineract_cdc_parse_errors_total > 0
         for: 0m
         labels:
           severity: warning

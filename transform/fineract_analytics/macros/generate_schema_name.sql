@@ -1,15 +1,11 @@
 {#
     Layer -> ClickHouse database mapping.
 
-    dbt's default appends the custom schema to the target schema
-    (fineract_staging becomes fineract_fineract_staging). We want the
-    layer databases created in 01_databases.sql to be used verbatim, so
-    the custom schema wins outright.
-
-    dev/ci/prod all resolve the same way; environment separation is done
-    with a whole ClickHouse instance (or a CLICKHOUSE_DATABASE prefix),
-    not with schema suffixes - suffix-based separation is how a CI run
-    ends up writing into a production relation.
+    dbt's default appends the custom schema to the target schema. Here the
+    generated name is `<target.schema>_<custom schema>`, which matches the
+    `fineract_*` databases created in 01_databases.sql when target.schema
+    is `fineract`. Check the target's schema before changing this macro: a
+    different value writes to databases the init DDL never created.
 #}
 {% macro generate_schema_name(custom_schema_name, node) -%}
     {%- if custom_schema_name is none -%}

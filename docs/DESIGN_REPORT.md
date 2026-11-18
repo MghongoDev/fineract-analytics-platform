@@ -69,8 +69,8 @@ can inject deterministic 503s to exercise the retry path.
 | Transformation | dbt 1.8 + dbt-clickhouse | staging → intermediate → marts → ml |
 | Orchestration | Airflow 2.10 (LocalExecutor) | 3 DAGs, 43 tasks |
 | Observability | Prometheus, Grafana, Pushgateway, statsd-exporter, custom exporter | Platform *and* data monitoring |
-| CI/CD | GitHub Actions | 9-job CI graph, gated CD, nightly quality run |
-| Packaging | Docker Compose | 17 services, 4 profiles, healthchecks throughout |
+| CI/CD | GitHub Actions | 10-job CI graph, gated CD, nightly quality run |
+| Packaging | Docker Compose | 23 services, 3 profiles, healthchecks throughout |
 
 ### 2.2 Data flow, stage by stage
 
@@ -115,8 +115,11 @@ conditions**:
 
 1. **Row parity.** ClickHouse live-key counts match Postgres counts per
    entity. Catches events dropped entirely.
-2. **Freshness.** The newest source commit visible in ClickHouse is under
-   five minutes old. Catches a stream that is merely slow.
+2. **Delivery lag.** The p95 Postgres-commit-to-ClickHouse-visible latency
+   for the watched entities is under five minutes. Catches a stream that
+   is merely slow. Source-event age is not used here: on a four-hour
+   schedule a quiet source has no recent commits, and gating on age would
+   time out on the normal no-change run.
 
 Neither alone is sufficient: an idle stream trivially satisfies row
 parity, and a stream delivering some events while silently dropping
@@ -218,18 +221,23 @@ tenure are re-derived as-of origination rather than taken from the
 current dimension.
 
 Deliberately absent: the loan's own repayment behaviour, current
-balances, current delinquency, `client_segment`. Every one of those is
-post-origination and would leak the label. A model trained on them scores
-about 0.95 AUC offline and is worthless in production — the single most
-common failure in credit-risk feature engineering. A singular dbt test,
-`assert_ml_features_are_point_in_time`, encodes the invariant so a
-refactor cannot quietly break it.
+balances, current delinquency, `client_segment`, and the CURRENT
+write-off or delinquency state of earlier loans. The staging model
+computes delinquency with `today()`, so a prior loan that defaulted after
+the observation date would pass a future event into the training row.
+Every one of these is post-origination and would leak the label. A model
+trained on them scores about 0.95 AUC offline and is worthless in
+production — the single most common failure in credit-risk feature
+engineering. A singular dbt test, `assert_ml_features_are_point_in_time`,
+encodes the invariant so a refactor cannot quietly break it.
 
 `ml_client_scoring_features` is the **serving** table: current-state
 features for scoring a client today. It legitimately contains what would
 be leakage in training. Keeping them as two tables with different rules
-is what stops that distinction from being lost, and the shared feature
-names are identical on purpose so one model applies to both.
+is what stops that distinction from being lost. Names match only where
+the definitions match; a feature computed from current delinquency exists
+in serving and is absent from training by design, so the two tables do
+not share a single drop-in feature contract.
 
 `split_hint` is time-based, not random: a random split leaks the future
 into training for a temporally ordered process. `is_label_mature`
@@ -273,7 +281,9 @@ runs warehouse-wide assertions as the last task. A failure is loud *and*
 the marts exist, so the on-call engineer inspects what was actually
 produced instead of guessing.
 
-**Unit and integration tests.** 105 tests: parsing (Fineract's four date
+**Unit and integration tests.** `make test` runs 168 unit tests with
+coverage; the integration suite adds 18 tests that need a running stack.
+Parsing (Fineract's four date
 encodings, decimal precision, hash stability), the HTTP client against a
 real socket (pagination termination, deterministic retry injection, rate
 limiting), the registry and mappers, pipeline mapping and dedup logic,
@@ -365,7 +375,7 @@ kafka_exporter, a JMX agent on Kafka Connect exposing Debezium's
 `MilliSecondsBehindSource`, statsd-exporter for Airflow, and Fineract's
 own Spring Boot actuator — source latency is a pipeline concern.
 
-18 alert rules with `for:` durations and a `runbook` annotation on each,
+15 alert rules with `for:` durations and a `runbook` annotation on each,
 plus recording rules for the expensive repeated expressions. Three
 Grafana dashboards: pipeline health, CDC and data quality, portfolio
 overview. Alert-by-alert procedures are in [`RUNBOOK.md`](RUNBOOK.md).
@@ -374,11 +384,15 @@ overview. Alert-by-alert procedures are in [`RUNBOOK.md`](RUNBOOK.md).
 
 ## 7. CI/CD
 
-Nine jobs in a real dependency graph, not a flat list:
+Ten jobs in a real dependency graph, not a flat list:
 
 `lint` → `unit-tests` → `sql-validation` → `dbt-checks` →
 `integration-tests` · `connector-config-validation` · `compose-validation`
 → `build-images` → `ci-summary`
+
+`dag-integrity` also runs on every push. It parses all three DAGs with the
+same Airflow image the stack uses, so an import error fails CI instead of
+silently removing a DAG from the scheduler. The suite passes all 18 checks.
 
 Worth singling out:
 
@@ -424,8 +438,8 @@ natively.
 | dbt DAG is valid ClickHouse | Built all **22 models** on the real engine | All built |
 | Data tests pass | All schema tests + 5 singular tests on the built DAG | All passed |
 | Airflow DAGs are correct | 18 integrity tests against **real Airflow 2.10.5** | All passed; 43 tasks, no cycles, CDC gate correctly positioned |
-| Test suite | 105 unit + integration tests | All passed |
-| Compose is valid | `docker compose config` | Valid; 17 services, 4 profiles |
+| Test suite | 168 unit tests (`make test`), 90.8% coverage | All passed |
+| Compose is valid | `docker compose config` | Valid; 23 services, 3 profiles |
 
 Two real bugs were caught by this process and fixed, both of which would
 have failed at runtime and neither of which any amount of review would
@@ -503,6 +517,13 @@ constraint is ClickHouse merge throughput on one node, not ingest.
 
 ### 9.5 Known limitations, stated plainly
 
+- **Hard deletes are not reconciled from the source.** Ingestion upserts
+  the keys it reads; it never marks a key absent from the API as deleted.
+  The CDC layer can reconcile a Postgres delete (`_is_deleted` and the
+  `rewrite` SMT are verified), but no delete reaches it from this path.
+  Fineract closes clients and reverses transactions rather than deleting
+  them, so the capture set mirrors that behaviour. A source that does
+  hard-delete needs a key-set reconciliation step before the loader.
 - **`dim_client` is Type 1, not Type 2.** History exists in
   `fineract_raw.cdc_audit` and in the uncollapsed raw layer; a third
   representation would be a third source of truth. If point-in-time
@@ -581,7 +602,7 @@ is the first thing that has to change, and §9.3 says how.
 ## 12. Repository map
 
 ```
-├── docker-compose.yml            17 services, 4 profiles, healthchecks throughout
+├── docker-compose.yml            23 services, 3 profiles, healthchecks throughout
 ├── Makefile                      28 self-documented targets; `make help`
 ├── ingestion/                    Fineract REST → Postgres (package + Dockerfile + tests)
 ├── platform/

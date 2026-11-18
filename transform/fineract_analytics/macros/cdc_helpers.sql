@@ -109,7 +109,7 @@
     0.0000001 per row is a reconciliation meeting nobody enjoys.
 #}
 {% macro money(expression) -%}
-    toDecimal64(ifNull({{ expression }}, 0), 6)
+    toDecimal128(ifNull({{ expression }}, 0), 6)
 {%- endmacro %}
 
 

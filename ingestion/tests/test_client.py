@@ -116,13 +116,15 @@ class TestPagination:
         assert all(len(page) <= 50 for page in pages)
         assert len(pages) == 5
 
-    def test_max_pages_bounds_the_crawl(self, mock_server):
+    def test_max_pages_fails_instead_of_truncating(self, mock_server):
         config = FineractConfig(
             base_url=mock_server, page_size=10, max_pages=2, requests_per_second=0
         )
         instance = FineractClient(config)
-        records = list(instance.iter_items("clients", paged=True))
-        assert len(records) == 20, "max_pages must cap an unbounded crawl"
+        # The source has more than two pages. Stopping quietly would land a
+        # complete-looking but wrong snapshot, so the cap must raise.
+        with pytest.raises(FineractError, match="max_pages=2"):
+            list(instance.iter_items("clients", paged=True))
         instance.close()
 
     def test_child_collection(self, client):

@@ -151,7 +151,7 @@ with DAG(
         task_id="dbt_full_refresh",
         command="build",
         select="{{ ti.xcom_pull(task_ids='build_dbt_arguments') }}",
-        full_refresh=True,
+        full_refresh="{{ ti.xcom_pull(task_ids='validate_parameters')['rebuild'] }}",
         fail_fast=True,
         execution_timeout=timedelta(hours=6),
     )

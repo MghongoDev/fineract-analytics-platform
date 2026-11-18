@@ -282,9 +282,13 @@ class FineractClient:
             if total is not None and offset >= total:
                 return
             if page_no == self.config.max_pages - 1:
-                log.warning(
-                    "fineract_max_pages_reached",
-                    extra={"path": path, "max_pages": self.config.max_pages, "fetched": offset},
+                # The cap exists to stop a runaway crawler, not to trim a
+                # legitimate source silently. A truncated batch would land
+                # as a complete-looking, wrong snapshot.
+                raise FineractError(
+                    f"GET {path} hit max_pages={self.config.max_pages} with "
+                    f"more data available ({offset} rows fetched). Raise "
+                    "FINERACT_MAX_PAGES or narrow the query."
                 )
 
     def iter_items(

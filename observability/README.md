@@ -44,7 +44,7 @@ Two things do not overlap, deliberately:
 | ClickHouse | Native Prometheus endpoint (`asynchronous_metrics`, `events`, `metrics`) | 9363 |
 | Kafka Connect (Debezium) | JMX exporter javaagent | 9404 |
 | statsd-exporter | Translates Airflow's StatsD metrics (see `observability/statsd/statsd-mapping.yml`) | 9102 |
-| Fineract | Spring Boot actuator / Micrometer metrics | 8443 (`/actuator/prometheus`) |
+| Fineract | Spring Boot actuator / Micrometer metrics | 8443 (`/fineract-provider/actuator/prometheus`) |
 | Grafana | Dashboards, provisioned from `observability/grafana` | 3000 (default) |
 
 ## Alerts
@@ -57,11 +57,11 @@ Full detail (expressions, `for:` windows, exact runbook text) lives in
 |---|---|---|---|
 | IngestionStalled | no success > 2h (10m `for`) | entity's data is going stale, or the job stopped running | Check the Airflow DAG run; trigger manually if stuck |
 | IngestionFailed | latest run status = failed | most recent load errored | Read `meta.ingestion_run.error_message` for the run |
-| IngestionRejectRateHigh | >50 rejects/hour for 15m | validators are quarantining a lot of records | Query `meta.ingestion_reject` grouped by `rule` to find the dominant failure |
+| IngestionRejectRateHigh | >50 currently quarantined for 15m | validators are quarantining a lot of records | Query `meta.ingestion_reject` grouped by `rule` to find the dominant failure |
 | CDCSlotLagHigh | slot WAL retention >512MB for 10m | Debezium consumer has fallen behind or stopped | `make cdc-status`; `make cdc-restart` if tasks are failed |
 | CDCSlotInactive | slot has no active consumer for 5m | connector is down; WAL is accumulating | `make cdc-status` then `make cdc-register` |
 | CDCFreshnessBreached | loans/loan_transactions >15m stale for 5m | the two most business-critical tables are behind | Check `job:cdc_lag_p95:max`; distinguish pipeline latency from a quiet source |
-| CDCParseErrors | any parse error in 15m | poison messages quarantined instead of applied | Inspect `fineract_raw.cdc_errors` for the topic |
+| CDCParseErrors | any quarantined parse error | poison messages quarantined instead of applied | Inspect `fineract_raw.cdc_errors` for the topic |
 | ReconciliationMismatch | non-zero delta for 15m | Postgres and ClickHouse disagree - CDC likely dropped events | Confirm lag/freshness are healthy, then trigger an incremental re-snapshot |
 | ClickHousePartsExplosion | >300 active parts for 15m | ReplacingMergeTree merges aren't keeping pace | Check `system.merges`; look for a drop in upstream insert batch size |
 | KafkaConsumerLag | >100k messages behind for 10m | a consumer group is falling behind | Check `fineract_ops.v_kafka_consumers` for rebalance churn |
@@ -71,13 +71,13 @@ Full detail (expressions, `for:` windows, exact runbook text) lives in
 
 ## Recording rules
 
-`observability/prometheus/rules/recording_rules.yml` pre-computes the
-expressions both the alert rules and the dashboards evaluate repeatedly
-(`job:cdc_lag_p95:max`, `job:ingestion_freshness_seconds:max`,
-`job:clickhouse_active_parts:max`, `job:reconciliation_row_delta:max_abs`),
-so the alert engine and every dashboard panel read the same pre-aggregated
-number rather than recomputing a `max()` over a live label set on every
-tick and every page load.
+`observability/prometheus/rules/recording_rules.yml` defines four
+pre-aggregated `job:*` series: `job:cdc_lag_p95:max`,
+`job:ingestion_freshness_seconds:max`, `job:clickhouse_active_parts:max`,
+and `job:reconciliation_row_delta:max_abs`. The current alert rules and
+dashboard panels query the raw metrics directly. The recording rules are
+available for ad-hoc queries and for future alerts that need the same
+aggregation; nothing evaluates them on a dashboard panel today.
 
 ## Dashboards
 

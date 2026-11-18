@@ -37,7 +37,7 @@ class DbtOperator(BaseOperator):
 
     def __init__(
         self,
-        command: str = "run",
+        command: str | Sequence[str] = "run",
         select: str | None = None,
         exclude: str | None = None,
         vars: dict | None = None,  # noqa: A002 - dbt's own name
@@ -50,7 +50,10 @@ class DbtOperator(BaseOperator):
         **kwargs: Any,
     ):
         super().__init__(**kwargs)
-        self.command = command
+        # dbt subcommands can be more than one token ("source freshness").
+        # Keep them as separate argv entries: passing "source freshness" as
+        # one token makes dbt report an unknown command and fail.
+        self.command = command.split() if isinstance(command, str) else list(command)
         self.select = select
         self.exclude = exclude
         self.vars = vars or {}
@@ -65,7 +68,7 @@ class DbtOperator(BaseOperator):
         argv = [
             "dbt",
             "--no-use-colors",
-            self.command,
+            *self.command,
             "--project-dir",
             self.project_dir,
             "--profiles-dir",
@@ -79,7 +82,10 @@ class DbtOperator(BaseOperator):
             argv += ["--exclude", self.exclude]
         if self.vars:
             argv += ["--vars", json.dumps(self.vars)]
-        if self.full_refresh:
+        # Jinja params render as the string "False"/"True". A bare
+        # `if self.full_refresh` treats "False" as truthy and would emit
+        # --full-refresh on every single run.
+        if str(self.full_refresh).lower() == "true":
             argv += ["--full-refresh"]
         if self.fail_fast:
             argv += ["--fail-fast"]
@@ -108,7 +114,9 @@ class DbtOperator(BaseOperator):
         self.log.info("dbt summary: %s", json.dumps(summary))
 
         if return_code != 0:
-            raise AirflowFailException(f"dbt {self.command} exited {return_code}: {summary}")
+            raise AirflowFailException(
+                f"dbt {' '.join(self.command)} exited {return_code}: {summary}"
+            )
 
         # Push to XCom so the quality gate and the metrics publisher can
         # read the outcome without re-parsing the artefacts.
@@ -190,12 +198,14 @@ class PublishDbtResultsOperator(BaseOperator):
             name = unique_id.split(".")[-1]
 
             if unique_id.startswith("test."):
+                failures = result.get("failures") or 0
+                severity = "error" if failures else "ok"
                 test_rows.append(
                     f"('{invocation_id}', '{dag_run_id}', '{executed_at}', "
                     f"'{self._escape(unique_id)}', '{self._escape(name)}', "
                     f"'{self._escape(name)}', '{layer}', '{status}', "
-                    f"'{result.get('failures') is not None and 'error' or 'error'}', "
-                    f"{int(result.get('failures') or 0)}, {timing}, '{message}')"
+                    f"'{severity}', "
+                    f"{int(failures)}, {timing}, '{message}')"
                 )
             else:
                 model_rows.append(
